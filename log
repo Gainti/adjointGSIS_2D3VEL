@@ -1,0 +1,101 @@
+
+
+[read config]
+
+========== Solver Config ==========
+[wall / physical]
+  uwall           = 1
+  tauw            = 0
+  delta           = 1
+  gamma           = 1.66666666667
+  Pr              = 0.666666666667
+  St              = 0
+
+[velocity space]
+  Nvx             = 32
+  Nvy             = 32
+  Nvz             = 16
+  Nv              = 16384
+  Lvx             = 6
+  Lvy             = 6
+  Lvz             = 6
+
+[iteration]
+  max_iter        = 100
+  tol             = 1e-05
+  print_interval  = 1
+  check_interval  = 1
+===================================
+
+
+
+[read mesh]
+mesh file name: cases/demo//mesh/cav_1_50_0.001.cas 
+Total points: 2601 	 Total faces: 5100 	 Total cells: 2500 	
+Internal faces: 4900 	 Boundary faces: 200 	
+
+
+
+[partition and distribute]
+rank:0 	 local Mesh nOwned:2500 	 nCells:2500 
+
+
+mesh deform
+[springSmooth] converged at iter = 122, maxMove = 8.240e-11
+
+
+[DVM solve]
+iter 1	 res_ux: 1.316778e+149	 res_uy: 3.624964e+148	 res_rho: 4.662138e+148 	 res_tau: 2.240045e+148
+
+iter 2	 res_ux: 2.141851e-01	 res_uy: 7.649590e-01	 res_rho: 1.541414e+00 	 res_tau: 5.760655e-01
+
+iter 3	 res_ux: 2.906929e-01	 res_uy: 3.177339e-01	 res_rho: 5.108435e-01 	 res_tau: 1.586301e-01
+
+iter 4	 res_ux: 2.456780e-01	 res_uy: 1.468338e-01	 res_rho: 1.443507e-01 	 res_tau: 1.169220e-01
+
+iter 5	 res_ux: 1.228290e-01	 res_uy: 9.079460e-02	 res_rho: 4.403225e-02 	 res_tau: 9.826736e-02
+
+iter 6	 res_ux: 3.235306e-02	 res_uy: 3.848410e-02	 res_rho: 2.623439e-02 	 res_tau: 5.003681e-02
+
+iter 7	 res_ux: 1.359286e-02	 res_uy: 1.434744e-02	 res_rho: 2.333125e-02 	 res_tau: 1.292416e-02
+
+iter 8	 res_ux: 1.762063e-02	 res_uy: 1.460702e-02	 res_rho: 1.503638e-02 	 res_tau: 8.582788e-03
+
+iter 9	 res_ux: 1.228449e-02	 res_uy: 1.275467e-02	 res_rho: 6.734866e-03 	 res_tau: 9.901122e-03
+
+iter 10	 res_ux: 5.604020e-03	 res_uy: 7.574814e-03	 res_rho: 1.994560e-03 	 res_tau: 6.852446e-03
+
+iter 11	 res_ux: 1.381071e-03	 res_uy: 2.731864e-03	 res_rho: 1.866396e-03 	 res_tau: 3.253486e-03
+
+iter 12	 res_ux: 1.158682e-03	 res_uy: 6.523239e-04	 res_rho: 1.864333e-03 	 res_tau: 8.503740e-04
+
+iter 13	 res_ux: 1.271692e-03	 res_uy: 1.406056e-03	 res_rho: 1.253565e-03 	 res_tau: 5.986898e-04
+
+iter 14	 res_ux: 8.477042e-04	 res_uy: 1.283304e-03	 res_rho: 6.054015e-04 	 res_tau: 7.652502e-04
+
+iter 15	 res_ux: 3.861737e-04	 res_uy: 7.774085e-04	 res_rho: 2.068092e-04 	 res_tau: 5.689980e-04
+
+iter 16	 res_ux: 1.145532e-04	 res_uy: 3.056100e-04	 res_rho: 1.442175e-04 	 res_tau: 2.961909e-04
+
+iter 17	 res_ux: 9.860608e-05	 res_uy: 4.159004e-05	 res_rho: 1.466726e-04 	 res_tau: 9.917656e-05
+
+iter 18	 res_ux: 9.975033e-05	 res_uy: 1.040131e-04	 res_rho: 1.043101e-04 	 res_tau: 4.571679e-05
+
+iter 19	 res_ux: 6.697115e-05	 res_uy: 1.068506e-04	 res_rho: 5.407972e-05 	 res_tau: 5.863169e-05
+
+iter 20	 res_ux: 3.175801e-05	 res_uy: 6.918297e-05	 res_rho: 2.009482e-05 	 res_tau: 4.668076e-05
+
+iter 21	 res_ux: 1.036230e-05	 res_uy: 2.998927e-05	 res_rho: 1.101261e-05 	 res_tau: 2.614777e-05
+
+iter 22	 res_ux: 7.725774e-06	 res_uy: 5.294567e-06	 res_rho: 1.132702e-05 	 res_tau: 9.937561e-06
+
+iter 23	 res_ux: 7.861061e-06	 res_uy: 7.068509e-06	 res_rho: 8.518358e-06 	 res_tau: 3.578088e-06
+
+DVM converged at iteration 23
+
+[TIMER] dvm                 min=81.507869s  avg=81.507869s  max=81.507869s
+
+
+
+[output macro]
+Successfully wrote field data to cases/demo/output/macro

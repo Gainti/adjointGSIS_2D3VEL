@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug (single-rank)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/poisson2d",
+      "args": [
+        "--case",
+        "${workspaceFolder}/cases/demo"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "cmake: build"
+    }
+  ]
+}
