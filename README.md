@@ -1,122 +1,167 @@
-# 2D Cell-Centered Unstructured FVM Poisson (MPI + METIS)
+# AdjointGSIS_2D3VEL
 
-This is a minimal but structured 2D unstructured finite volume (cell-centered) Poisson solver framework:
+一个基于 **MPI 并行 + 非结构网格** 的二维离散速度法（DVM）求解器框架，当前主要包含：
 
-- 2D Fluent ASCII `.cas` input only (no binary, no 3D)
-- Gauss-Seidel (SOR) linear solver with MPI halo exchange
-- METIS graph partitioning for cell-based domain decomposition
-- Tecplot ASCII output (cell centers) with `u_num`, `u_exact`, `error`
+- Fluent ASCII `.cas` 网格读取（2D）
+- 基于 METIS 的网格划分与分区分发
+- Halo 交换与并行迭代
+- 原始（primal）DVM 求解流程
+- 预留伴随（adjoint）与边界敏感度模块
+- Tecplot (`.szplt`) 宏观量输出
 
-## Build (Linux)
+> 说明：仓库名称包含 `adjoint`，代码中也已有伴随与敏感度相关模块，但在 `main.cpp` 中默认只启用原始 DVM 流程，伴随流程目前处于注释/预留状态。
+
+---
+
+## 1. 目录结构
+
+```text
+src/
+  core/   配置读取、常量定义、工具函数、计时/性能统计
+  mesh/   Fluent 网格解析、几何计算、分区、halo、网格形变
+  dvm/    DVM 主求解器、伴随求解器、边界敏感度装配
+  io/     残差与 Tecplot 输出
+cases/
+  demo/   示例算例（config.ini）
+```
+
+---
+
+## 2. 主要功能与当前状态
+
+### 已实现（主流程）
+
+1. **读取配置与网格**
+   - 通过 `--case <caseDir>` 读取 `<caseDir>/config.ini`
+   - 读取 Fluent ASCII `.cas` 网格并构建单元/面拓扑
+
+2. **并行划分与通信准备**
+   - 根进程读取全局网格
+   - 基于 METIS 对单元图划分
+   - 分发局部网格并构建 halo 通信信息
+
+3. **DVM 原始方程迭代**
+   - 构建 3 维速度空间（`Nvx × Nvy × Nvz`）
+   - 迭代推进并监控 `rho/ux/uy` 残差
+
+4. **结果输出**
+   - 输出 Tecplot 网格与单元中心变量（`macro`）
+
+### 已有模块但默认未启用
+
+- 伴随 DVM 迭代流程（`initialAdj/stepAdj`）
+- 边界灵敏度组装（`boundary_sensitivity`）
+- 网格形变接口（`meshDeform`）
+
+---
+
+## 3. 依赖与环境
+
+- C++17
+- CMake ≥ 3.15
+- MPI（`find_package(MPI REQUIRED)`）
+- METIS + GKlib
+- TecIO（当前通过 `./tecio/` 目录链接）
+
+> 注意：`CMakeLists.txt` 中 METIS/GKlib 路径是硬编码的本地路径，使用前请按你的环境修改：
+>
+> - `METIS_INCLUDE_DIR`
+> - `METIS_LIBRARY`
+> - `GK_INCLUDE_DIR`
+> - `GK_LIBRARY`
+
+---
+
+## 4. 编译
+
+推荐使用仓库自带脚本：
+
+```bash
+./make.sh
+```
+
+等价命令：
 
 ```bash
 mkdir -p build
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-Requires: MPI, METIS, CMake >= 3.15, C++17 compiler.
+默认可执行文件：
 
-## Run
+```text
+build/solver
+```
 
-Single rank:
+---
+
+## 5. 运行
+
+### 单进程
+
 ```bash
-./build/poisson2d --case cases/demo
+./build/solver --case cases/demo
 ```
 
-MPI:
+### MPI 并行
+
 ```bash
-mpirun -np 4 ./build/poisson2d --case cases/demo
+mpirun -np 4 ./build/solver --case cases/demo
 ```
 
-## Configuration (INI)
+仓库中也提供脚本：
 
-Config file is required. Program accepts:
-
-- `./poisson2d --case <caseDir>` -> uses `<caseDir>/config.ini`
-
-Example `config.ini`:
-```
-[case]
-mesh_file = cav_1_20.cas
-output_dir = output
-
-[solver]
-maxIter = 2000
-tol = 1e-10
-printInterval = 20
-checkInterval = 1
-omega = 1.0
+```bash
+./run.sh
+./mpirun.sh
 ```
 
-`checkInterval` controls how often global residual is evaluated (`MPI_Allreduce`).
-For large MPI runs, setting `checkInterval=5~20` can reduce synchronization overhead.
+---
 
-## Recommended Build Types for Performance
+## 6. 配置文件说明（`cases/demo/config.ini`）
 
-- Debug (`-O0 -g`): for debugging only
-- Release (`-O3`): preferred for production timing/scaling
-- RelWithDebInfo: profiling with symbols and optimization
+### `[case]`
 
-All other parameters must be in config.
+- `mesh_file`：网格文件路径（相对 `case` 目录拼接）
+- `output_dir`：输出目录
 
-## Input Mesh (.cas) Requirements
+### `[solver]` 关键参数
 
-- 2D Fluent ASCII `.cas` only
-- Tri/quad cells (faces are 2-node edges in 2D)
-- Parser supports common Fluent ASCII sections:
-  - `(10 ...)` nodes
-  - `(13 ...)` faces
-  - `(12 ...)` cells (optional; used for count if present)
-- Cell IDs and node IDs are expected 1-based as in Fluent
-- Boundary faces are detected by neighbor cell ID = 0
+- `uwall`：壁面速度方向设置
+- `tauw` / `delta` / `St`：物理参数
+- `Nvx,Nvy,Nvz`：速度空间离散数
+- `Lvx,Lvy,Lvz`：速度空间截断范围
+- `maxIter`：最大迭代步
+- `tol`：收敛阈值
+- `printInterval`：打印间隔
+- `checkInterval`：残差检查间隔
 
-### How to Export Fluent ASCII .cas (conceptual)
+程序启动时会在 rank0 打印完整求解参数。
 
-In Fluent/ANSYS:
-1. Ensure the mesh is 2D.
-2. Use the Case export/save option and choose ASCII `.cas`.
-3. Do not export binary format.
+---
 
-## Discretization Summary
+## 7. 输出结果
 
-Poisson equation:
-```
--(d2u/dx2 + d2u/dy2) = f
-u_exact = sin(pi*x) * sin(pi*y)
-f = 2*pi^2 * sin(pi*x) * sin(pi*y)
-```
+当前主流程会输出宏观量 Tecplot 文件：
 
-Cell-centered FVM with orthogonal diffusion flux:
-- Internal face: `(uN - uP) * (|Sf| / dPN)`
-- Dirichlet boundary: `(uB - uP) * (|Sf| / dPB)`
+- `<output_dir>/macro.szplt`（以及相关 Tecplot 文件）
 
-`dPN` is the projection of cell-center distance onto face normal.  
-`uB` is the exact solution at the face center.
+代码中还包含残差 CSV 与伴随变量输出接口，可根据需要在 `main.cpp` 中启用。
 
-## Outputs
+---
 
-Output directory (from config):
+## 8. 网格与模型限制
 
-- `residual.csv` (iter,residual)
-- `solution.dat` (Tecplot ASCII; cell centers)
+- 当前按 **2D Fluent ASCII** 网格流程设计
+- 仅支持项目中已实现的边界处理与物理闭合
+- 伴随与敏感度虽有代码基础，但默认流程未完全打开
 
-The log prints L2 and Linf errors:
-```
-L2 = sqrt( sum(Vc*(u_num-u_exact)^2) / sum(Vc*(u_exact)^2) )
-Linf = max |u_num-u_exact|
-```
+---
 
-## Limitations
+## 9. 后续建议
 
-- 2D only
-- Fluent ASCII `.cas` only
-- No non-orthogonal correction (first-order orthogonal approximation)
-- Gauss-Seidel only (SOR supported via `omega`)
-
-## TODO / Extensions
-
-- Non-orthogonal correction and improved gradient reconstruction
-- Faster solvers (CG, AMG, PETSc)
-- More boundary condition types (Neumann, mixed)
-- Binary `.cas` and 3D support
+- 将 METIS/GKlib/TecIO 改为可配置查找（避免硬编码路径）
+- 在 `README` 中补充典型工况与物理模型说明（如控制方程、无量纲定义）
+- 增加最小可复现实验（mesh + baseline log + 结果对比）
+- 完整打通伴随求解与灵敏度输出流程
