@@ -237,3 +237,200 @@ void haloExchangeCellData(
 //         }
 //     }
 // }
+
+
+void buildInteriorBoundaryCells(Mesh& local)
+{
+    local.interiorCells.clear();
+    local.boundaryCells.clear();
+
+    local.interiorCells.reserve(local.nOwned);
+    local.boundaryCells.reserve(local.nOwned);
+
+    for (int cellI = 0; cellI < local.nOwned; ++cellI) {
+        bool needsGhost = false;
+        const auto& cell = local.cells[cellI];
+
+        for (int faceI : cell.cell2face) {
+            const Face& f = local.faces[faceI];
+            int nb = -1;
+
+            if (f.neigh < 0) {
+                continue; // physical boundary£¬²»ÒÀÀµ ghost
+            }
+
+            if (f.owner == cellI) nb = f.neigh;
+            else                  nb = f.owner;
+
+            if (nb >= local.nOwned) {
+                needsGhost = true;
+                break;
+            }
+        }
+
+        if (needsGhost) local.boundaryCells.push_back(cellI);
+        else            local.interiorCells.push_back(cellI);
+    }
+}
+void initHaloWorkspace(
+    const Mesh& local,
+    HaloWorkspace& ws,
+    int ncomp)
+{
+    const HaloPlan& hp = local.halo;
+    const int nnei = (int)hp.neighbors.size();
+
+    ws.ncomp = ncomp;
+
+    ws.send_counts_comp.resize(nnei);
+    ws.recv_counts_comp.resize(nnei);
+    ws.send_displs_comp.resize(nnei);
+    ws.recv_displs_comp.resize(nnei);
+
+    int total_send = 0;
+    int total_recv = 0;
+
+    for (int k = 0; k < nnei; ++k) {
+        const int nsend_cells = hp.send_offsets[k + 1] - hp.send_offsets[k];
+        const int nrecv_cells = hp.recv_offsets[k + 1] - hp.recv_offsets[k];
+
+        ws.send_counts_comp[k] = nsend_cells * ncomp;
+        ws.recv_counts_comp[k] = nrecv_cells * ncomp;
+
+        ws.send_displs_comp[k] = total_send;
+        ws.recv_displs_comp[k] = total_recv;
+
+        total_send += ws.send_counts_comp[k];
+        total_recv += ws.recv_counts_comp[k];
+    }
+
+    ws.send_buffer.resize((size_t)total_send);
+    ws.recv_buffer.resize((size_t)total_recv);
+    ws.requests.resize((size_t)2 * nnei, MPI_REQUEST_NULL);
+}
+void haloExchangeBegin(
+    const Mesh& local,
+    HaloWorkspace& ws,
+    const double* data,
+    int ncomp,
+    MPI_Comm comm,
+    HaloExchangeStats* stats)
+{
+    const HaloPlan& hp = local.halo;
+    const int nnei = (int)hp.neighbors.size();
+
+    if (ws.ncomp != ncomp) {
+        initHaloWorkspace(local, ws, ncomp);
+    }
+
+    const double t_total0 = MPI_Wtime();
+
+    // 1) post recv
+    {
+        const double t0 = MPI_Wtime();
+        for (int k = 0; k < nnei; ++k) {
+            MPI_Irecv(ws.recv_buffer.data() + ws.recv_displs_comp[k],
+                      ws.recv_counts_comp[k],
+                      MPI_DOUBLE,
+                      hp.neighbors[k],
+                      300,
+                      comm,
+                      &ws.requests[k]);
+        }
+        if (stats) stats->t_post_recv += MPI_Wtime() - t0;
+    }
+
+    // 2) pack send buffer
+    {
+        const double t0 = MPI_Wtime();
+        for (int k = 0; k < nnei; ++k) {
+            double* sbuf = ws.send_buffer.data() + ws.send_displs_comp[k];
+            const int begin = hp.send_offsets[k];
+            const int end   = hp.send_offsets[k + 1];
+
+            for (int i = begin; i < end; ++i) {
+                const int lc = hp.send_cells[i];
+                const int local_i = i - begin;
+                memcpy(sbuf + (size_t)local_i * ncomp,
+                       data + (size_t)lc * ncomp,
+                       sizeof(double) * ncomp);
+            }
+        }
+        if (stats) stats->t_pack += MPI_Wtime() - t0;
+    }
+
+    // 3) post send
+    {
+        const double t0 = MPI_Wtime();
+        for (int k = 0; k < nnei; ++k) {
+            MPI_Isend(ws.send_buffer.data() + ws.send_displs_comp[k],
+                      ws.send_counts_comp[k],
+                      MPI_DOUBLE,
+                      hp.neighbors[k],
+                      300,
+                      comm,
+                      &ws.requests[nnei + k]);
+        }
+        if (stats) stats->t_post_send += MPI_Wtime() - t0;
+    }
+
+    if (stats) stats->t_total += MPI_Wtime() - t_total0;
+}
+void haloExchangeEnd(
+    const Mesh& local,
+    HaloWorkspace& ws,
+    double* data,
+    int ncomp,
+    MPI_Comm comm,
+    HaloExchangeStats* stats)
+{
+    (void)comm;
+    const HaloPlan& hp = local.halo;
+    const int nnei = (int)hp.neighbors.size();
+
+    const double t_total0 = MPI_Wtime();
+
+    // 4) wait
+    {
+        const double t0 = MPI_Wtime();
+        if (!ws.requests.empty()) {
+            MPI_Waitall((int)ws.requests.size(), ws.requests.data(), MPI_STATUSES_IGNORE);
+        }
+        if (stats) stats->t_wait += MPI_Wtime() - t0;
+    }
+
+    // 5) unpack
+    {
+        const double t0 = MPI_Wtime();
+        for (int k = 0; k < nnei; ++k) {
+            const double* rbuf = ws.recv_buffer.data() + ws.recv_displs_comp[k];
+            const int begin = hp.recv_offsets[k];
+            const int end   = hp.recv_offsets[k + 1];
+
+            for (int i = begin; i < end; ++i) {
+                const int lc = hp.recv_cells[i];
+                const int local_i = i - begin;
+                memcpy(data + (size_t)lc * ncomp,
+                       rbuf + (size_t)local_i * ncomp,
+                       sizeof(double) * ncomp);
+            }
+        }
+        if (stats) stats->t_unpack += MPI_Wtime() - t0;
+    }
+
+    if (stats) stats->t_total += MPI_Wtime() - t_total0;
+}
+void haloExchange(
+    const Mesh& local,
+    HaloWorkspace& ws,
+    double* data,
+    int ncomp,
+    MPI_Comm comm,
+    HaloExchangeStats* stats)
+{
+    HaloExchangeStats tmp;
+    HaloExchangeStats* s = stats ? stats : &tmp;
+
+    haloExchangeBegin(local, ws, data, ncomp, comm, s);
+    haloExchangeEnd(local, ws, data, ncomp, comm, s);
+}

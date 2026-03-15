@@ -86,6 +86,13 @@ struct HaloPlan
     std::vector<int> ghost_owner_rank; // size = nCells - nOwned
 };
 
+struct CellFaceInfo {
+    int nf;
+    int neigh_id[8];
+    int nb_base[8];
+    double sfx[8], sfy[8];
+    int8_t orient[8];
+};
 
 struct Mesh
 {
@@ -93,6 +100,9 @@ struct Mesh
     std::vector<Face> faces;
     std::vector<Cell> cells;
     std::vector<std::vector<int>> cell2node;
+
+    std::vector<int> interiorCells;
+    std::vector<int> boundaryCells;
 
     std::vector<int> part;
 

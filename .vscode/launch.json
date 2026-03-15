@@ -5,7 +5,7 @@
       "name": "Debug (single-rank)",
       "type": "lldb",
       "request": "launch",
-      "program": "${workspaceFolder}/build/Debug/poisson2d",
+      "program": "${workspaceFolder}/build/Debug/solver",
       "args": [
         "--case",
         "${workspaceFolder}/cases/demo"

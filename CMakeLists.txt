@@ -6,13 +6,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -DEIGEN_NO_DEBUG -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 
 find_package(MPI REQUIRED)
 
-set(METIS_INCLUDE_DIR "/usr/include")
-set(METIS_LIBRARY "/usr/lib/x86_64-linux-gnu/libmetis.so")
+# set(METIS_INCLUDE_DIR "/usr/include")
+# set(METIS_LIBRARY "/usr/lib/x86_64-linux-gnu/libmetis.so")
+# set(METIS_LIBRARY "/usr/lib/x86_64-linux-gnu/libmetis.so.5.1.0")
+
+set(METIS_INCLUDE_DIR "/home/emc2/Software/lib/metis_lib/include")
+set(METIS_LIBRARY "/home/emc2/Software/lib/metis_lib/lib/libmetis.so")
+
+set(GK_INCLUDE_DIR "/home/emc2/Software/lib/gk_lib/include")
+set(GK_LIBRARY "/home/emc2/Software/lib/gk_lib/lib/libGKlib.a")
 
 # tecio
 include_directories(./tecio/)
@@ -43,10 +50,12 @@ target_include_directories(solver PUBLIC
     src/mesh 
     src/dvm
     ${METIS_INCLUDE_DIR}
+    ${GK_INCLUDE_DIR}
 )
 target_link_libraries(solver PUBLIC 
     tecio
     MPI::MPI_CXX
     pthread
     ${METIS_LIBRARY}
+    ${GK_LIBRARY}
 )

@@ -2,7 +2,6 @@
 #include "utils.h"
 
 #include <cstdio>
-#include <locale>
 #include <string>
 
 #include <mpi.h>
@@ -162,23 +161,33 @@ int main(int argc, char** argv) {
     MPI_Barrier(MPI_COMM_WORLD);
 
 
-    message("mesh deform",rank);
-    std::vector<int> boundaryPts;
-    collectAllBoundaryPoints(globalMesh, boundaryPts);
+    printf("rank %d: interior=%zu boundary=%zu owned=%d ghost=%d\n",
+        rank,
+        localMesh.interiorCells.size(),
+        localMesh.boundaryCells.size(),
+        localMesh.nOwned,
+        localMesh.nCells - localMesh.nOwned);
+
+    // message("mesh deform",rank);
+    // std::vector<int> boundaryPts;
+    // collectAllBoundaryPoints(globalMesh, boundaryPts);
     
-    std::vector<BoundaryNodeDisplacement> bdisp;
-    bdisp.reserve(boundaryPts.size());
+    // std::vector<BoundaryNodeDisplacement> bdisp;
+    // bdisp.reserve(boundaryPts.size());
     
-    double scale = 1.2;
-    for (int pid : boundaryPts)
-    {
-        const auto& point = globalMesh.points[pid];
-        vector d(0.0, (scale-1.0)*point.y, 0.0);
-        bdisp.push_back({pid, d});
-    }
+    // double scale = 1.2;
+    // for (int pid : boundaryPts)
+    // {
+    //     const auto& point = globalMesh.points[pid];
+    //     vector d(0.0, (scale-1.0)*point.y, 0.0);
+    //     bdisp.push_back({pid, d});
+    // }
     
-    deformMeshSpring(globalMesh,localMesh, bdisp, MPI_COMM_WORLD, 500, 1e-10, 1.8);
-    MPI_Barrier(MPI_COMM_WORLD);
+    // deformMeshSpring(globalMesh,localMesh, bdisp, MPI_COMM_WORLD, 500, 1e-10, 1.8);
+    // MPI_Barrier(MPI_COMM_WORLD);
+
+    // used for halo exchange
+
  
     // 修改关于邻居的定义(边界面的邻居不是-1,而是边界面对应的单元id)
     for (int bf = 0; bf < localMesh.nBoundaryFaces; ++bf) {
@@ -186,14 +195,17 @@ int main(int argc, char** argv) {
         localMesh.faces[faceI].neigh = localMesh.nCells + bf; // boundary pseudo cell
     }
 
+
     double eps = 1e-4;
     // verifySensitivityByFiniteDifference(globalMesh,localMesh,scfg,MPI_COMM_WORLD,eps);
+
 
     // dvm 
     message("[DVM solve]",rank);
     dvmSolver dvm(localMesh,scfg,MPI_COMM_WORLD);
-    t0=MPI_Wtime();
-    for(int iter=1;iter<scfg.max_iter;iter++){
+    
+    t0 = MPI_Wtime();
+    for(int iter=1; iter<scfg.max_iter; iter++){
         dvm.step(iter);
         if(dvm.res_ux < scfg.tol && dvm.res_uy < scfg.tol && dvm.res_rho < scfg.tol) {
             if (rank == 0) {
@@ -203,7 +215,9 @@ int main(int argc, char** argv) {
         }
     }
     t1 = MPI_Wtime();
-    report_stage_time("dvm",t1-t0,MPI_COMM_WORLD);
+    
+    report_stage_time("dvm", t1 - t0, MPI_COMM_WORLD);
+    dvm.reportProfile();
 
     // Adjoint solver
     // message("[Adjoint solve]",rank);

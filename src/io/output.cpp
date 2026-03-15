@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <mpi_proto.h>
 #include <vector>
 #include <exception>
 #include <iostream>

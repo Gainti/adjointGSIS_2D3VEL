@@ -1,8 +1,6 @@
 #include "partition.h"
 
 #include "mesh.h"
-#include "utils.h"
-
 #include <metis.h>
 
 #include <algorithm>
@@ -244,6 +242,34 @@ static void recv_pack(LocalPack& pack, MPI_Comm comm) {
         MPI_Recv(pack.ghost_owner_ranks.data(), counts[4], MPI_INT, 0, 104, comm, MPI_STATUS_IGNORE);
 }
 
+static void build_adjacency(const Mesh& mesh,
+    std::vector<idx_t>& xadj,
+    std::vector<idx_t>& adjncy) {
+    std::vector<std::vector<int>> adj(mesh.cells.size());
+    for (const auto& face : mesh.faces) {
+        if (face.neigh >= 0) {
+            adj[face.owner].push_back(face.neigh);
+            adj[face.neigh].push_back(face.owner);
+        }
+    }
+    xadj.resize(mesh.cells.size() + 1);
+    size_t total = 0;
+    for (size_t i = 0; i < adj.size(); ++i) {
+        auto& a = adj[i];
+        std::sort(a.begin(), a.end());
+        a.erase(std::unique(a.begin(), a.end()), a.end());
+        xadj[i] = static_cast<idx_t>(total);
+        total += a.size();
+    }
+    xadj[adj.size()] = static_cast<idx_t>(total);
+    adjncy.resize(total);
+    size_t pos = 0;
+    for (size_t i = 0; i < adj.size(); ++i) {
+        for (int v : adj[i]) {
+            adjncy[pos++] = static_cast<idx_t>(v);
+        }
+    }
+}
 
 bool partition_and_distribute(
 	Mesh& mesh, 
@@ -260,9 +286,39 @@ bool partition_and_distribute(
         // partition(simple partition)
         auto& part = mesh.part;
         part.resize(mesh.nCells);
-        for(int c=0;c<mesh.nCells;c++){
-            part[c] = ownerRank_block(c, mesh.nCells, size);
+        if(size==1){
+            std::fill(part.begin(),part.end(),0);
+        }else{
+            std::vector<idx_t> xadj;
+            std::vector<idx_t> adjncy;
+            build_adjacency(mesh, xadj, adjncy);
+            idx_t n = static_cast<idx_t>(mesh.cells.size());
+            idx_t ncon = 1;
+            idx_t nparts = static_cast<idx_t>(size);
+            idx_t objval = 0;
+            std::vector<idx_t> part_metis(n);
+
+            idx_t options[METIS_NOPTIONS];
+            METIS_SetDefaultOptions(options);
+            options[METIS_OPTION_OBJTYPE] = METIS_OBJTYPE_VOL;   // 更偏向通信体积
+            options[METIS_OPTION_CONTIG]  = 1;                  // 尽量连通
+            options[METIS_OPTION_MINCONN] = 1;                  // 减少子域连接数
+            options[METIS_OPTION_NUMBERING] = 0;
+
+            int status = METIS_PartGraphKway(&n, &ncon, xadj.data(), adjncy.data(),
+            nullptr, nullptr, nullptr, &nparts,
+            nullptr, nullptr, options, &objval, part_metis.data());
+            if (status != METIS_OK) {
+                err = "METIS_PartGraphKway failed.";
+                return false;
+            }
+            for(int cellI=0;cellI<mesh.nCells;cellI++){
+                part[cellI]=part_metis[cellI];
+            }
         }
+        // for(int c=0;c<mesh.nCells;c++){
+        //     part[c] = ownerRank_block(c, mesh.nCells, size);
+        // }
 
         // send to each rank
         for(int r=0;r<size;r++){
@@ -295,6 +351,7 @@ bool partition_and_distribute(
     buildCellFaces(local);// cell2face
     buildCellPoint(local);// cell2node
     computeGeometry(local,comm);
+    buildInteriorBoundaryCells(local);
 
     return true;
 }
