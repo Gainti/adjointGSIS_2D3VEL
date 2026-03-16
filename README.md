@@ -9,8 +9,6 @@
 - 预留伴随（adjoint）与边界敏感度模块
 - Tecplot (`.szplt`) 宏观量输出
 
-> 说明：仓库名称包含 `adjoint`，代码中也已有伴随与敏感度相关模块，但在 `main.cpp` 中默认只启用原始 DVM 流程，伴随流程目前处于注释/预留状态。
-
 ---
 
 ## 1. 目录结构
@@ -47,7 +45,7 @@ cases/
 4. **结果输出**
    - 输出 Tecplot 网格与单元中心变量（`macro`）
 
-### 已有模块但默认未启用
+### 未完全开发
 
 - 伴随 DVM 迭代流程（`initialAdj/stepAdj`）
 - 边界灵敏度组装（`boundary_sensitivity`）

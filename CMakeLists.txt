@@ -41,6 +41,7 @@ add_executable(solver
     src/mesh/meshDeform.cpp
     src/dvm/adjointDVM.cpp
     src/dvm/boundary_sensitivity.cpp
+    src/test/geom_chain_validation.cpp
 )
 
 target_include_directories(solver PUBLIC 
@@ -49,6 +50,7 @@ target_include_directories(solver PUBLIC
     src/io 
     src/mesh 
     src/dvm
+    src/test
     ${METIS_INCLUDE_DIR}
     ${GK_INCLUDE_DIR}
 )

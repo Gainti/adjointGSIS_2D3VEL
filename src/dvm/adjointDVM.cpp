@@ -159,16 +159,13 @@ void dvmSolver::cellIterAdj(int cellI) {
     }
 }
 void dvmSolver::lusgsIterAdj() {
-    // exchangeVDF();
     for(size_t iter=0;iter<5;iter++){
         for(int cellI=0;cellI<mesh.nOwned;cellI++) {
             cellIterAdj(cellI);
         }
-        // exchangeVDF();
         for(int cellI=mesh.nOwned-1;cellI>=0;cellI--) {
             cellIterAdj(cellI);
         }
-        // exchangeVDF();
     }
 }
 void dvmSolver::stepAdj(int iter){

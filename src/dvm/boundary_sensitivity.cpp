@@ -1,5 +1,6 @@
 #include "boundary_sensitivity.h"
 #include "defs.h"
+#include "mesh.h"
 #include <cmath>
 #include <stdexcept>
 #include <array>
@@ -58,7 +59,7 @@ EdgeGeomDeriv2D computeEdgeGeomDeriv2D(const vector& r1, const vector& r2)
 
     // dn / dr1x
     g.dndr[0][0][0] =  dx*dy / A3;
-    g.dndr[0][1][0] = -dy*dy / A3;
+    g.dndr[0][1][0] =  dy*dy / A3;
 
     // dn / dr1y
     g.dndr[0][0][1] = -dx*dx / A3;
@@ -204,7 +205,14 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
             int idx_owner = solver.index_vdf(ownerj, vi);
             int idx_neigh = solver.index_vdf(neighj, vi);
 
-            double hf = 0.5 * (solver.vdf[idx_owner] + solver.vdf[idx_neigh]);
+            vector Sf = fj.Sf;
+            double vn = Sf.x * solver.Vx[vi] + Sf.y * solver.Vy[vi];
+            double hf = 0.0;
+            if (vn > 0.0) {
+                hf = solver.vdf[idx_owner];
+            }else{
+                hf = solver.vdf[idx_neigh];
+            }
 
             if (owner == ownerj) {
                 gx += hf * fj.Sf.x;
@@ -446,6 +454,11 @@ void BoundarySensitivityAssembler::accumulateNodeGradients(
         auto gd = computeEdgeGeomDeriv2D(mesh.points[n1], mesh.points[n2]);
         const auto& fg = faceGrad[facei];
 
+        double magSf = f.Sf.mag();
+        if(gd.n.x!= f.Sf.x/magSf || gd.n.y!=f.Sf.y/magSf){
+            printf("Error: edge geom deriv doesn't match face normal\n");
+        }
+
         int nodes[2] = {n1, n2};
 
         for (int s = 0; s < 2; ++s) {
@@ -467,6 +480,7 @@ void BoundarySensitivityAssembler::accumulateNodeGradients(
 
             nodeGrad[nodes[s]].dx += add.dx;
             nodeGrad[nodes[s]].dy += add.dy;
+            
         }
     }
 }
