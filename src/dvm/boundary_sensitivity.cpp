@@ -74,33 +74,6 @@ EdgeGeomDeriv2D computeEdgeGeomDeriv2D(const vector& r1, const vector& r2)
     return g;
 }
 
-// =========================
-// diffuse boundary model
-// =========================
-DiffuseBoundaryModel::KernelGrad
-DiffuseBoundaryModel::computeKernelAndGradN(
-    dvmSolver& solver, int facei, int owner)
-{
-    KernelGrad out;
-    const auto& f = solver.mesh.faces[facei];
-    vector nf = f.Sf / f.Sf.mag();
-
-    for (int vi = 0; vi < solver.Nv; ++vi) {
-        double cn = nf.x * solver.Vx[vi] + nf.y * solver.Vy[vi];
-        if (cn > 0.0) {
-            int idx_owner = solver.index_vdf(owner, vi);
-            double hp = solver.vdf[idx_owner];
-            double coeff = 2.0 / PI * solver.exp_c2[vi] * hp * solver.weight[vi];
-
-            out.K += coeff * cn;
-            out.dKdn[0] += coeff * solver.Vx[vi];
-            out.dKdn[1] += coeff * solver.Vy[vi];
-        }
-    }
-
-    return out;
-}
-
 std::array<double,2> DiffuseBoundaryModel::wallVelocity(
     dvmSolver& solver, int facei)
 {
@@ -187,9 +160,6 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
     const auto& cell  = mesh.cells[owner];
     const auto& faces = mesh.faces;
 
-    gradHx.assign(solver.Nv, 0.0);
-    gradHy.assign(solver.Nv, 0.0);
-
     double V = cell.V;
     if (V <= 1e-30) return;
 
@@ -202,16 +172,13 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
             int ownerj = fj.owner;
             int neighj = fj.neigh;
 
-            int idx_owner = solver.index_vdf(ownerj, vi);
-            int idx_neigh = solver.index_vdf(neighj, vi);
-
             vector Sf = fj.Sf;
             double vn = Sf.x * solver.Vx[vi] + Sf.y * solver.Vy[vi];
             double hf = 0.0;
             if (vn > 0.0) {
-                hf = solver.vdf[idx_owner];
+                hf = solver.vdf[ownerj*solver.Nv + vi];
             }else{
-                hf = solver.vdf[idx_neigh];
+                hf = solver.vdf[neighj*solver.Nv + vi];
             }
 
             if (owner == ownerj) {
@@ -239,24 +206,31 @@ void BoundarySensitivityAssembler::accumulate_dJdA_dJdn(
 {
     const auto& f = solver.mesh.faces[facei];
 
-    int ghost = f.neigh;
+    int neigh = f.neigh;
     double A = f.Sf.mag();
     vector nf = f.Sf / A;
 
+    double dJdA = 0.0;
+    double dJdn[2] = {0.0, 0.0};
+
     for (int vi = 0; vi < solver.Nv; ++vi) {
         double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
-        int idx_g = solver.index_vdf(ghost, vi);
 
-        double h = solver.vdf[idx_g];
+        double h = solver.vdf[neigh*solver.Nv + vi];
         double m = (cn > 0.0) ? obj.mPlus(solver, facei, vi)
                               : obj.mMinus(solver, facei, vi);
 
         double w = solver.feq[vi] * solver.weight[vi];
 
-        g.dLdA    += cn * m * h * w;
-        g.dLdn[0] += A * m * h * solver.Vx[vi] * w;
-        g.dLdn[1] += A * m * h * solver.Vy[vi] * w;
+
+        dJdA += cn * m * h * w;
+        dJdn[0] += A * m * h * solver.Vx[vi] * w;
+        dJdn[1] += A * m * h * solver.Vy[vi] * w;
     }
+
+    g.dJdA = dJdA;
+    g.dJdn[0] = dJdn[0];
+    g.dJdn[1] = dJdn[1];
 }
 
 // =========================
@@ -279,6 +253,8 @@ void BoundarySensitivityAssembler::accumulate_dJdC(
     double A = f.Sf.mag();
     vector nf = f.Sf / A;
 
+    double dJdC[2] = {0.0, 0.0};
+
     for (int vi = 0; vi < solver.Nv; ++vi) {
         double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
         double m  = (cn > 0.0) ? obj.mPlus(solver, facei, vi)
@@ -286,27 +262,80 @@ void BoundarySensitivityAssembler::accumulate_dJdC(
 
         double coeff = A*cn*m*solver.feq[vi] * solver.weight[vi];
 
-        g.dLdC[0] += coeff * gradHx[vi];
-        g.dLdC[1] += coeff * gradHy[vi];
-    }
+        dJdC[0] += coeff * gradHx[vi];
+        dJdC[1] += coeff * gradHy[vi];
+     }
+
+    g.dJdC[0] = dJdC[0];
+    g.dJdC[1] = dJdC[1];
 }
 
 // =========================
-// dKdC
+// dBw/dn
 // =========================
-std::array<double,2> BoundarySensitivityAssembler::compute_dKdC(
+void BoundarySensitivityAssembler::accumulate_dBwdn(
     dvmSolver& solver,
     int facei,
-    int owner,
-    const std::vector<double>& gradHx,
-    const std::vector<double>& gradHy)
+    const BoundaryFunctional& obj,
+    FaceGeomGrad& g)
 {
     const auto& f = solver.mesh.faces[facei];
+    int owner = f.owner;
+    int neigh = f.neigh;
     double A = f.Sf.mag();
     vector nf = f.Sf / A;
 
-    std::array<double,2> dKdC{0.0, 0.0};
+    // compute dK/dn
+    double dKdn[2] = {0.0, 0.0};
+    for (int vi = 0; vi < solver.Nv; ++vi) {
+        double cn = nf.x * solver.Vx[vi] + nf.y * solver.Vy[vi];
+        if (cn > 0.0) {
+            double hp = solver.vdf[neigh*solver.Nv + vi];
+            double coeff = 2.0 / PI * solver.exp_c2[vi] * hp * solver.weight[vi];
 
+            dKdn[0] += coeff * solver.Vx[vi];
+            dKdn[1] += coeff * solver.Vy[vi];
+        }
+    }
+
+    double dBwdn[2] = {0.0, 0.0};
+    for (int vi = 0; vi < solver.Nv; ++vi) {
+        double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+        if (cn >= 0.0) continue;
+
+        double phi_minus = solver.avdf[neigh*solver.Nv + vi];
+        double mminus = obj.mMinus(solver, facei, vi);
+        double lambda = -cn * (phi_minus + mminus);
+
+        double w = solver.feq[vi] * solver.weight[vi];
+        auto dhbdn = DiffuseBoundaryModel::dhb_dn(solver, facei, vi);
+        dBwdn[0] += lambda * (-dKdn[0] - dhbdn[0]) * w;
+        dBwdn[1] += lambda * (-dKdn[1] - dhbdn[1]) * w;
+
+    }
+    g.dBwdn[0] = A * dBwdn[0];
+    g.dBwdn[1] = A * dBwdn[1];
+}
+
+// =========================
+// dBw/dC
+// =========================
+void BoundarySensitivityAssembler::accumulate_dBwdC(
+    dvmSolver& solver,
+    int facei,
+    const BoundaryFunctional& obj,
+    const std::vector<double>& gradHx,
+    const std::vector<double>& gradHy,
+    FaceGeomGrad& g)
+{
+    const auto& f = solver.mesh.faces[facei];
+    int owner = f.owner;
+    int neigh = f.neigh;
+    double A = f.Sf.mag();
+    vector nf = f.Sf / A;
+
+    // compute dK/dC
+    double dKdC[2] = {0.0, 0.0};
     for (int vi = 0; vi < solver.Nv; ++vi) {
         double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
         if (cn <= 0.0) continue;
@@ -317,78 +346,23 @@ std::array<double,2> BoundarySensitivityAssembler::compute_dKdC(
         dKdC[1] += coeff * gradHy[vi];
     }
 
-    return dKdC;
-}
-
-// =========================
-// dBw/dn
-// =========================
-void BoundarySensitivityAssembler::accumulate_dBwdn(
-    dvmSolver& solver,
-    int facei,
-    int owner,
-    const BoundaryFunctional& obj,
-    FaceGeomGrad& g)
-{
-    const auto& f = solver.mesh.faces[facei];
-    double A = f.Sf.mag();
-    vector nf = f.Sf / A;
-
-    auto Kg = DiffuseBoundaryModel::computeKernelAndGradN(solver, facei, owner);
-
+    // dBw/dC
+    double dBwdC[2] = {0.0, 0.0};
     for (int vi = 0; vi < solver.Nv; ++vi) {
         double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
         if (cn >= 0.0) continue;
 
-        int idx_owner = solver.index_vdf(owner, vi);
-        double phi_minus = solver.avdf[idx_owner];
-        double mminus = obj.mMinus(solver, facei, vi);
-        double lambda = -cn * (phi_minus + mminus);
-
-        double w = solver.feq[vi] * solver.weight[vi];
-        auto dhbdn = DiffuseBoundaryModel::dhb_dn(solver, facei, vi);
-
-        g.dLdn[0] += A * lambda * (-Kg.dKdn[0] - dhbdn[0]) * w;
-        g.dLdn[1] += A * lambda * (-Kg.dKdn[1] - dhbdn[1]) * w;
-    }
-}
-
-// =========================
-// dBw/dC
-// =========================
-void BoundarySensitivityAssembler::accumulate_dBwdC(
-    dvmSolver& solver,
-    int facei,
-    int owner,
-    const BoundaryFunctional& obj,
-    const std::vector<double>& gradHx,
-    const std::vector<double>& gradHy,
-    const std::array<double,2>& dKdC,
-    FaceGeomGrad& g)
-{
-    (void)owner;
-
-    const auto& f = solver.mesh.faces[facei];
-    double A = f.Sf.mag();
-    vector nf = f.Sf / A;
-
-    for (int vi = 0; vi < solver.Nv; ++vi) {
-        double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
-        if (cn >= 0.0) continue;
-
-        int idx_owner = solver.index_vdf(f.owner, vi);
-        double phi_minus = solver.avdf[idx_owner];
+        double phi_minus = solver.avdf[neigh*solver.Nv + vi];
         double mminus = obj.mMinus(solver, facei, vi);
         double lambda = -cn * (phi_minus + mminus);
 
         double w = solver.feq[vi] * solver.weight[vi];
 
-        // current approximation:
-        // dh^-/dC ~ grad(owner)
-        // dhb/dC = 0
-        g.dLdC[0] += A * lambda * (gradHx[vi] - dKdC[0]) * w;
-        g.dLdC[1] += A * lambda * (gradHy[vi] - dKdC[1]) * w;
+        dBwdC[0] += lambda * (gradHx[vi] - dKdC[0]) * w;
+        dBwdC[1] += lambda * (gradHy[vi] - dKdC[1]) * w;
     }
+    g.dBwdC[0] = A * dBwdC[0];
+    g.dBwdC[1] = A * dBwdC[1];
 }
 
 // =========================
@@ -405,6 +379,9 @@ void BoundarySensitivityAssembler::assembleFaceGradients(
     std::vector<double> ownerGradHx;
     std::vector<double> ownerGradHy;
 
+    ownerGradHx.resize(solver.Nv, 0.0);
+    ownerGradHy.resize(solver.Nv, 0.0);
+
     for (int facei = mesh.nInternalFaces; facei < mesh.nFaces; ++facei) {
         const auto& f = mesh.faces[facei];
         if (f.bc_type != BCType::wall &&
@@ -416,23 +393,26 @@ void BoundarySensitivityAssembler::assembleFaceGradients(
 
         FaceGeomGrad g;
 
-        // 1) owner cell gradient for this face only
+        // compute gradient of owner cell
         computeOwnerCellGradient(solver, owner, ownerGradHx, ownerGradHy);
 
-        // 2) objective terms
+        // objective terms
         accumulate_dJdA_dJdn(solver, facei, obj, g);
         accumulate_dJdC(solver, facei, obj, ownerGradHx, ownerGradHy, g);
 
-        // 3) boundary constraint terms
-        auto dKdC = compute_dKdC(
-            solver, facei, owner, ownerGradHx, ownerGradHy);
+        // boundary constraint terms
+        accumulate_dBwdn(solver, facei, obj, g);
+        accumulate_dBwdC(solver, facei, obj, ownerGradHx, ownerGradHy, g);
 
-        accumulate_dBwdn(solver, facei, owner, obj, g);
-        accumulate_dBwdC(
-            solver, facei, owner, obj,
-            ownerGradHx, ownerGradHy, dKdC, g);
+        // sum
+        g.dLdA = g.dJdA;
+        g.dLdC[0] = g.dJdC[0] + g.dBwdC[0];
+        g.dLdC[1] = g.dJdC[1] + g.dBwdC[1];
+        g.dLdn[0] = g.dJdn[0] + g.dBwdn[0];
+        g.dLdn[1] = g.dJdn[1] + g.dBwdn[1];
 
         faceGrad[facei] = g;
+
     }
 }
 
@@ -455,7 +435,7 @@ void BoundarySensitivityAssembler::accumulateNodeGradients(
         const auto& fg = faceGrad[facei];
 
         double magSf = f.Sf.mag();
-        if(gd.n.x!= f.Sf.x/magSf || gd.n.y!=f.Sf.y/magSf){
+        if(std::abs(gd.n.x-f.Sf.x/magSf)>1e-8 || std::abs(gd.n.y-f.Sf.y/magSf)>1e-8){
             printf("Error: edge geom deriv doesn't match face normal\n");
         }
 
@@ -480,7 +460,7 @@ void BoundarySensitivityAssembler::accumulateNodeGradients(
 
             nodeGrad[nodes[s]].dx += add.dx;
             nodeGrad[nodes[s]].dy += add.dy;
-            
+
         }
     }
 }

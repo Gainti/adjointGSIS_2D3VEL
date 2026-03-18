@@ -29,8 +29,7 @@ void dvmSolver::updateAdjMacro() {
             for(int i=0;i<4;i++){
                 scalar amacro_old = amacro[cellI*Namacro+i];
                 up_local[i]+=(amacro_old-a[i])*(amacro_old-a[i])*V;
-                // down[i]+=macro_temp[i]*macro_temp[i]*V;
-                down_local[i]+=amacro_old*amacro_old*V;
+                down_local[i]+=a[i]*a[i]*V;
             }
         }
         for(int k=0;k<Namacro;k++) {

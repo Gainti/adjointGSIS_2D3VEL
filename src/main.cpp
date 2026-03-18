@@ -24,8 +24,9 @@
 #include "object.hpp"
 
 
-
-#include "geom_chain_validation.h"
+//-------TEST----------
+// #include "geom_chain_validation.h"
+#include "adjoint_validation.h"
 
 static void usage() {
     printf("Usage:\n");
@@ -173,11 +174,11 @@ int main(int argc, char** argv) {
         localMesh.nCells - localMesh.nOwned);
 
     // message("mesh deform",rank);
-    std::vector<int> boundaryPts;
-    collectAllBoundaryPoints(globalMesh, boundaryPts);
+    // std::vector<int> boundaryPts;
+    // collectAllBoundaryPoints(globalMesh, boundaryPts);
     
-    std::vector<BoundaryNodeDisplacement> bdisp;
-    bdisp.reserve(boundaryPts.size());
+    // std::vector<BoundaryNodeDisplacement> bdisp;
+    // bdisp.reserve(boundaryPts.size());
     
     // double scale = 0.8;
     // for (int pid : boundaryPts)
@@ -197,19 +198,22 @@ int main(int argc, char** argv) {
         localMesh.faces[faceI].neigh = localMesh.nCells + bf; // boundary pseudo cell
     }
 
+    // 几何导数链验证
+    // runGeometryChainValidation(localMesh,1.0e-7);
+
+    // 检查边界节点移动后有限差分导数和伴随导数的一致性
+    validateOneBoundaryPoint(localMesh, scfg, MPI_COMM_WORLD);
 
     // double eps = 1e-3;
     // verifySensitivityByFiniteDifference(globalMesh,localMesh,scfg,MPI_COMM_WORLD,eps);
 
 
     // auto baseResult=solveAdjointAndAssembleSensitivity(localMesh, scfg, MPI_COMM_WORLD);
-
     // printf("Objective J: %e \t Directional Derivative: %e\n", baseResult.J, baseResult.directionalDeriv);
 
 
-    message("[DVM solve]",rank);
-    dvmSolver dvm(localMesh,scfg,MPI_COMM_WORLD);
-    
+    // message("[DVM solve]",rank);
+    // dvmSolver dvm(localMesh,scfg,MPI_COMM_WORLD);
     // t0 = MPI_Wtime();
     // for(int iter=1; iter<scfg.max_iter; iter++){
     //     dvm.step(iter);
@@ -221,15 +225,12 @@ int main(int argc, char** argv) {
     //     }
     // }
     // t1 = MPI_Wtime();
-    
     // report_stage_time("dvm", t1 - t0, MPI_COMM_WORLD);
-    // dvm.reportProfile();
+    // // dvm.reportProfile();
 
-    runGeometryChainValidation(localMesh,1.0e-7);
-
-    // Adjoint solver
     // message("[Adjoint solve]",rank);
     // dvm.initialAdj();
+    // t0 = MPI_Wtime();
     // for(int iter=1;iter<scfg.max_iter;iter++){
     //     dvm.stepAdj(iter);
     //     if(dvm.res_aux < scfg.tol && dvm.res_auy < scfg.tol && dvm.res_arho < scfg.tol) {
@@ -239,17 +240,8 @@ int main(int argc, char** argv) {
     //         break;
     //     }
     // }
-
-    // compute sensitivity
-    // message("[boundary sensitivity]",rank);
-    // XForceFunctional obj;
-
-    // std::vector<FaceGeomGrad> faceGrad;
-    // BoundarySensitivityAssembler::assembleFaceGradients(dvm, obj, faceGrad);
-    
-    // std::vector<NodeGrad> nodeGrad;
-    // BoundarySensitivityAssembler::accumulateNodeGradients(localMesh, faceGrad, nodeGrad);
-
+    // t1 = MPI_Wtime();
+    // report_stage_time("adjoint", t1 - t0, MPI_COMM_WORLD);
 
     // message("[output macro]",rank);
     // int Nmacro = 10;

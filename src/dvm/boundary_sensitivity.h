@@ -8,9 +8,13 @@
 
 struct FaceGeomGrad
 {
-    double dLdA = 0.0;
-    std::array<double,2> dLdC{0.0, 0.0};
-    std::array<double,2> dLdn{0.0, 0.0};
+    double dJdA;
+    double dJdC[2], dBwdC[2];
+    double dJdn[2], dBwdn[2];
+
+    double dLdA;
+    double dLdC[2];
+    double dLdn[2];
 };
 
 struct NodeGrad
@@ -118,28 +122,18 @@ private:
         const std::vector<double>& gradHy,
         FaceGeomGrad& g);
 
-    static std::array<double,2> compute_dKdC(
-        dvmSolver& solver,
-        int facei,
-        int owner,
-        const std::vector<double>& gradHx,
-        const std::vector<double>& gradHy);
-
     static void accumulate_dBwdn(
         dvmSolver& solver,
         int facei,
-        int owner,
         const BoundaryFunctional& obj,
         FaceGeomGrad& g);
 
     static void accumulate_dBwdC(
         dvmSolver& solver,
         int facei,
-        int owner,
         const BoundaryFunctional& obj,
         const std::vector<double>& gradHx,
         const std::vector<double>& gradHy,
-        const std::array<double,2>& dKdC,
         FaceGeomGrad& g);
 };
 

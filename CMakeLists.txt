@@ -41,7 +41,8 @@ add_executable(solver
     src/mesh/meshDeform.cpp
     src/dvm/adjointDVM.cpp
     src/dvm/boundary_sensitivity.cpp
-    src/test/geom_chain_validation.cpp
+    # src/test/geom_chain_validation.cpp
+    src/test/adjoint_validation.cpp
 )
 
 target_include_directories(solver PUBLIC 
