@@ -113,7 +113,6 @@ void adjointDVM::diffuseWallwithObject(int facei) {
             int idx_owner = index_vdf(owner, vi);
             int idx_neigh = index_vdf(neigh, vi);
             avdf[idx_neigh] = avdf[idx_owner];
-
             double m = objectiveWeight(Vx[vi], Vy[vi]);
             rhor += cn * feq[vi] * (avdf[idx_neigh] + m) * weight[vi];
         }

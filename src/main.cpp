@@ -214,7 +214,11 @@ int main(int argc, char** argv) {
     // runGeometryChainValidation(localMesh,1.0e-7);
 
     // 检查边界节点移动后有限差分导数和伴随导数的一致性
-    // validateOneBoundaryPoint(localMesh,vel,scfg, MPI_COMM_WORLD);
+    validateOneBoundaryPoint(localMesh,vel,scfg, MPI_COMM_WORLD);  
+
+
+    // 检查边界缩放后有限差分导数和伴随导数的一致性
+    // validateYscaleboundary(globalMesh,localMesh,vel,scfg, MPI_COMM_WORLD);
 
     // double eps = 1e-3;
     // verifySensitivityByFiniteDifference(globalMesh,localMesh,scfg,MPI_COMM_WORLD,eps);
@@ -224,42 +228,42 @@ int main(int argc, char** argv) {
     // printf("Objective J: %e \t Directional Derivative: %e\n", baseResult.J, baseResult.directionalDeriv);
 
 
-    message("[DVM solve]",rank);
-    dvmSolver dvm(localMesh,vel,scfg,MPI_COMM_WORLD);
-    t0 = MPI_Wtime();
-    for(int iter=1; iter<scfg.max_iter; iter++){
-        dvm.step(iter);
-        if(dvm.res_ux < scfg.tol && dvm.res_uy < scfg.tol && dvm.res_rho < scfg.tol) {
-            if (rank == 0) {
-                printf("DVM converged at iteration %d\n\n", iter);
-            }
-            break;
-        }
-    }
-    t1 = MPI_Wtime();
-    report_stage_time("dvm", t1 - t0, MPI_COMM_WORLD);
-    // dvm.reportProfile();
+    // message("[DVM solve]",rank);
+    // dvmSolver dvm(localMesh,vel,scfg,MPI_COMM_WORLD);
+    // t0 = MPI_Wtime();
+    // for(int iter=1; iter<scfg.max_iter; iter++){
+    //     dvm.step(iter);
+    //     if(dvm.res_ux < scfg.tol && dvm.res_uy < scfg.tol && dvm.res_rho < scfg.tol) {
+    //         if (rank == 0) {
+    //             printf("DVM converged at iteration %d\n\n", iter);
+    //         }
+    //         break;
+    //     }
+    // }
+    // t1 = MPI_Wtime();
+    // report_stage_time("dvm", t1 - t0, MPI_COMM_WORLD);
+    // // dvm.reportProfile();
 
-    message("[Adjoint solve]",rank);
-    adjointDVM adj(dvm);
-    t0 = MPI_Wtime();
-    for(int iter=1;iter<scfg.max_iter;iter++){
-        adj.step(iter);
-        if(adj.res_aux < scfg.tol && adj.res_auy < scfg.tol && adj.res_arho < scfg.tol) {
-            if (rank == 0) {
-                printf("Adjoint DVM converged at iteration %d\n\n", iter);
-            }
-            break;
-        }
-    }
-    t1 = MPI_Wtime();
-    report_stage_time("adjoint", t1 - t0, MPI_COMM_WORLD);
+    // message("[Adjoint solve]",rank);
+    // adjointDVM adj(dvm);
+    // t0 = MPI_Wtime();
+    // for(int iter=1;iter<scfg.max_iter;iter++){
+    //     adj.step(iter);
+    //     if(adj.res_aux < scfg.tol && adj.res_auy < scfg.tol && adj.res_arho < scfg.tol) {
+    //         if (rank == 0) {
+    //             printf("Adjoint DVM converged at iteration %d\n\n", iter);
+    //         }
+    //         break;
+    //     }
+    // }
+    // t1 = MPI_Wtime();
+    // report_stage_time("adjoint", t1 - t0, MPI_COMM_WORLD);
 
-    message("[output macro]",rank);
-    write_tecplot(utils::join_path(output_dir, "macro"),globalMesh,localMesh,dvm.macro,Nmacro,MPI_COMM_WORLD);
+    // message("[output macro]",rank);
+    // write_tecplot(utils::join_path(output_dir, "macro"),globalMesh,localMesh,dvm.macro,Nmacro,MPI_COMM_WORLD);
 
-    message("[output adjoint macro]",rank);
-    write_tecplot(utils::join_path(output_dir, "amacro"),globalMesh,localMesh,adj.amacro,Namacro,MPI_COMM_WORLD);
+    // message("[output adjoint macro]",rank);
+    // write_tecplot(utils::join_path(output_dir, "amacro"),globalMesh,localMesh,adj.amacro,Namacro,MPI_COMM_WORLD);
 
     MPI_Finalize();
     return 0;

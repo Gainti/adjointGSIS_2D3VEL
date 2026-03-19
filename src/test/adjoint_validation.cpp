@@ -83,18 +83,14 @@ void perturbOnePoint(Mesh& mesh, int point_id, int coord, double ds)
  * ============================================================ */
 
 bool validateOneBoundaryPoint(const Mesh& base_mesh,
-                        const VelocitySpace& vel,
-                        const SolverConfig& cfg,
-                        MPI_Comm comm)
+    const VelocitySpace& vel,
+    const SolverConfig& cfg,
+    MPI_Comm comm)
 {
 
-    int validate_point = 2550;
+    int validate_point = 2;
     int validate_coord = 1; // 0=x, 1=y
     double eps_scale = 1e-4;
-
-
-    const double href = localReferenceLength(base_mesh, validate_point);
-    const double eps = eps_scale * href;
 
     // ADJ
     double g_adj = 0.0;
@@ -141,6 +137,9 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
     Mesh plus_mesh = base_mesh;
     Mesh minus_mesh = base_mesh;
 
+    const double href = localReferenceLength(base_mesh, validate_point);
+    const double eps = eps_scale * href;
+
     perturbOnePoint(plus_mesh,  validate_point, validate_coord, +eps);
     perturbOnePoint(minus_mesh, validate_point, validate_coord, -eps);
 
@@ -168,6 +167,146 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
         (validate_coord == 0 ? 'x' : 'y'),
         eps,
         J0, Jp, Jm, g_fd, g_adj, rel_err, abs_err);
+
+    return true;
+}
+
+
+void perturbYscaling(Mesh& mesh, double scale)
+{
+    std::vector<char> isBoundary(mesh.points.size(), 0);
+    for (int facei = mesh.nInternalFaces; facei < mesh.nFaces; ++facei) {
+        const auto& f = mesh.faces[facei];
+        if(f.bc_type == BCType::pressure_far_field){
+            isBoundary[f.n1] = 1;
+            isBoundary[f.n2] = 1;
+        }
+    }
+    for(int pointI=0; pointI<mesh.points.size(); ++pointI){
+        if(isBoundary[pointI]){
+            mesh.points[pointI].y *= scale;
+        }
+    }
+    computeGeometry(mesh, MPI_COMM_WORLD);
+}
+
+double projectGradientToYScalingDirection(
+    const Mesh& mesh,
+    const std::vector<NodeGrad>& nodeGrad,
+    MPI_Comm comm)
+{
+    std::vector<char> isBoundary(mesh.points.size(), 0);
+    for (int facei = mesh.nInternalFaces; facei < mesh.nFaces; ++facei) {
+        const auto& f = mesh.faces[facei];
+        if(f.bc_type == BCType::pressure_far_field){
+            isBoundary[f.n1] = 1;
+            isBoundary[f.n2] = 1;
+        }
+    }
+
+    double local = 0.0;
+    for (size_t pid = 0; pid < mesh.points.size(); ++pid) {
+        if (!isBoundary[pid]) continue;
+        local += nodeGrad[pid].dy * mesh.points[pid].y;
+    }
+
+    double global = 0.0;
+    MPI_Allreduce(&local, &global, 1, MPI_DOUBLE, MPI_SUM, comm);
+    return global;
+}
+
+bool validateYscaleboundary(const Mesh& globalMesh,
+    const Mesh& localMesh,
+    const VelocitySpace& vel,
+    const SolverConfig& cfg,
+    MPI_Comm comm)
+{
+    double eps_scale = 1e-4;
+
+    // ADJ
+    double g_adj = 0.0;
+    dvmSolver solver(localMesh, vel, cfg, comm);
+
+    for (int iter = 1; iter < cfg.max_iter; ++iter)
+    {
+        solver.step(iter);
+
+        if (solver.res_rho < cfg.tol &&
+            solver.res_ux  < cfg.tol &&
+            solver.res_uy  < cfg.tol)
+        {
+            break;
+        }
+    }
+
+    adjointDVM adj(solver);
+
+    for (int iter = 1; iter < cfg.max_iter; ++iter)
+    {
+        adj.step(iter);
+
+        if (adj.res_arho < cfg.tol &&
+            adj.res_aux  < cfg.tol &&
+            adj.res_auy  < cfg.tol)
+        {
+            break;
+        }
+    }
+
+    BoundarySensitivityAssembler assembler;
+
+    std::vector<FaceGeomGrad> faceGrad;
+    std::vector<NodeGrad> nodeGrad;
+
+    assembler.assembleFaceGradients(solver, adj, faceGrad);
+    assembler.accumulateNodeGradients(localMesh, faceGrad, nodeGrad);
+
+    double J0 = computeObjective(solver);
+
+    g_adj = projectGradientToYScalingDirection(localMesh, nodeGrad, comm);
+
+    std::vector<char> isBoundary(localMesh.points.size(), 0);
+    for (int facei = localMesh.nInternalFaces; facei < localMesh.nFaces; ++facei) {
+        const auto& f = localMesh.faces[facei];
+        if(f.bc_type == BCType::internal) continue;
+        isBoundary[f.n1] = 1;
+        isBoundary[f.n2] = 1;
+    }
+    for(int pointI=0; pointI<localMesh.points.size(); ++pointI){
+        if(isBoundary[pointI]){
+            printf("point %d: x = %e, y= %e, dJ/dx = %e, dJ/dy = %e\n", pointI, localMesh.points[pointI].x, localMesh.points[pointI].y, nodeGrad[pointI].dx, nodeGrad[pointI].dy);
+        }
+    }
+
+    // FD
+    // Mesh plus_mesh = localMesh;
+    // Mesh minus_mesh = localMesh;
+
+    // const double href = 1.0;
+    // const double eps = eps_scale * href;
+
+    // perturbYscaling(plus_mesh, 1.0 + eps);
+    // perturbYscaling(minus_mesh, 1.0 - eps);
+
+    // const double Jp = runPrimalAndEvalJ(plus_mesh, vel, cfg, comm);
+    // const double Jm = runPrimalAndEvalJ(minus_mesh, vel, cfg, comm);
+    // const double g_fd   = (Jp - Jm) / (2.0 * eps);
+
+    // // compare with adjoint gradient
+    // const double rel_err = std::fabs(g_fd - g_adj) / g_fd;
+    // const double abs_err = std::fabs(g_fd - g_adj);
+
+    // std::printf(
+    //     "[validation] eps=%.6e\n"
+    //     "  J0   = %.12e\n"
+    //     "  J+   = %.12e\n"
+    //     "  J-   = %.12e\n"
+    //     "  FD   = %.12e\n"
+    //     "  ADJ  = %.12e\n"
+    //     "  REL  = %.12e\n"
+    //     "  ABS  = %.12e\n",
+    //     eps,
+    //     J0, Jp, Jm, g_fd, g_adj, rel_err, abs_err);
 
     return true;
 }

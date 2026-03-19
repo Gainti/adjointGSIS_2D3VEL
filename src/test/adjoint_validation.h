@@ -13,12 +13,10 @@
 #include "object.h"
 #include "boundary_sensitivity.h"
 
-bool isBoundaryFace(const Face& f);
-std::vector<int> collectBoundaryPoints(const Mesh& mesh);
-std::vector<int> collectOwnerCellsAroundPoint(const Mesh& mesh, int point_id);
-double localReferenceLength(const Mesh& mesh, int point_id);
+#include "meshDeform.h"
 
-bool recomputeMeshGeometry(Mesh& mesh);
+bool isBoundaryFace(const Face& f);
+double localReferenceLength(const Mesh& mesh, int point_id);
 
 // 跑一次 primal，返回目标函数 J
 double runPrimalAndEvalJ(const Mesh& mesh,
@@ -31,22 +29,22 @@ void perturbOnePoint(Mesh& mesh, int point_id, int coord, double ds);
 
 // 有限差分验证主入口
 bool validateOneBoundaryPoint(const Mesh& base_mesh,
-                    const VelocitySpace& vel,
-                    const SolverConfig& cfg,
-                    MPI_Comm comm);
+    const VelocitySpace& vel,
+    const SolverConfig& cfg,
+    MPI_Comm comm);
 
-// 如果你后续有“每个边界面的几何灵敏度”，可用这个把面梯度回收到点梯度
-struct FaceGeomGrad_t
-{
-    double dJ_dCfx = 0.0;
-    double dJ_dCfy = 0.0;
-    double dJ_dSfx = 0.0;
-    double dJ_dSfy = 0.0;
-};
 
-double contractFaceGeomGradToPoint(const Mesh& mesh,
-                                   const std::vector<FaceGeomGrad_t>& face_grad,
-                                   int point_id,
-                                   int coord);
+// 计算关于scale的伴随导数
+double projectGradientToYScalingDirection(
+    const Mesh& mesh,
+    const std::vector<NodeGrad>& nodeGrad,
+    MPI_Comm comm);
+
+// 将网格整体沿 y 方向缩放，验证伴随导数在这个方向上的投影
+bool validateYscaleboundary(const Mesh& globalMesh,
+    const Mesh& localMesh,
+    const VelocitySpace& vel,
+    const SolverConfig& cfg,
+    MPI_Comm comm);
 
 #endif

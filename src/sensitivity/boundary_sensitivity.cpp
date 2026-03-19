@@ -138,10 +138,13 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
     const auto& cell  = mesh.cells[owner];
     const auto& faces = mesh.faces;
 
+    const auto& h =primal.vdf;
+    const int Nv = primal.Nv;
+
     double V = cell.V;
     if (V <= 1e-30) return;
 
-    for (int vi = 0; vi < primal.Nv; ++vi) {
+    for (int vi = 0; vi < Nv; ++vi) {
         double gx = 0.0;
         double gy = 0.0;
 
@@ -154,9 +157,9 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
             double vn = Sf.x * primal.Vx[vi] + Sf.y * primal.Vy[vi];
             double hf = 0.0;
             if (vn > 0.0) {
-                hf = primal.vdf[ownerj*primal.Nv + vi];
+                hf = h[ownerj*Nv + vi];
             }else{
-                hf = primal.vdf[neighj*primal.Nv + vi];
+                hf = h[neighj*Nv + vi];
             }
 
             if (owner == ownerj) {
