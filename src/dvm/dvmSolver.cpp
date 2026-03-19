@@ -51,63 +51,66 @@ dvmSolver::dvmSolver(const Mesh& mesh,
 
 }
 
+void dvmSolver::diffuseWall(int facei, double uwx, double uwy) {
+    const auto& face = mesh.faces[facei];
+    int owner = face.owner;
+    int neigh = face.neigh;
+
+    const vector& Sf = face.Sf;
+    vector nf = Sf / Sf.mag();
+
+    scalar rhor = Zero;
+    for (int vi = 0; vi < Nv; vi++) {
+        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (cn > 0.0) {
+            int idx_owner = index_vdf(owner, vi);
+            int idx_neigh = index_vdf(neigh, vi);
+            vdf[idx_neigh] = vdf[idx_owner];
+            rhor += cn * exp_c2[vi] * vdf[idx_neigh] * weight[vi] * 2.0 / PI;
+        }
+    }
+
+    double uwn = uwx * nf.x + uwy * nf.y;
+    for (int vi = 0; vi < Nv; vi++) {
+        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (cn < 0.0) {
+            int idx_neigh = index_vdf(neigh, vi);
+            double udotv = uwx * Vx[vi] + uwy * Vy[vi];
+            scalar temp = rhor - sqrtPI * uwn + 2.0 * udotv;
+            vdf[idx_neigh] = temp;
+        }
+    }
+}
+
 void dvmSolver::boundarySet() {
     ScopedTimer timer(profiler, DvmTimerID::BoundarySet);
 
-    const auto& faces = mesh.faces;
-    for(int facei=mesh.nInternalFaces;facei<mesh.nFaces;facei++){
-        if(faces[facei].bc_type==BCType::wall ||
-        faces[facei].bc_type==BCType::pressure_far_field){
-            int owner=faces[facei].owner;
-            int neigh=faces[facei].neigh;
-            const vector& Sf=faces[facei].Sf;
-            double magSf=Sf.mag();
-            vector nf= Sf/magSf;
-            
-            // 积分获得rhor
-            scalar rhor=Zero;
-            // vector xof=mesh.Cf()[facei]-mesh.C()[owner];
-            for(int vi=0;vi<Nv;vi++) {
-                double cn=nf.x*Vx[vi]+nf.y*Vy[vi];
-                if (cn>0.0) {
-                    int idx_owner = index_vdf(owner,vi);
-                    int idx_neigh = index_vdf(neigh,vi);
-                    vdf[idx_neigh] = vdf[idx_owner];
-                    rhor+=cn*exp_c2[vi]*vdf[idx_neigh]*weight[vi]*2.0/PI;
+    for (int facei = mesh.nInternalFaces; facei < mesh.nFaces; facei++) {
+        const auto bcType = mesh.faces[facei].bc_type;
+        if (bcType == BCType::wall) {
+            diffuseWall(facei, 0.0, 0.0);
+        } else if (bcType == BCType::pressure_far_field) {
+            double uw[2]={0.0, 0.0};
+            switch (cfg.uwall) {
+                case 0:{
+                    const vector& Sf = mesh.faces[facei].Sf;
+                    vector nf = Sf / Sf.mag();
+                    uw[0] = nf.y;
+                    uw[1] = -nf.x;
+                    break;
                 }
-            }
-            // 反射边界条件
-            double uwx=0.0,uwy=0.0;
-            if(faces[facei].bc_type==BCType::pressure_far_field){
-                switch (cfg.uwall) {
-                    case 0:
-                        uwx = nf.y; uwy = -nf.x;
-                        break;
-                    case 1:
-                        // normal x direction
-                        uwx = 1.0;
-                        break;
-                    case 2:
-                        // normal y direction
-                        uwy = 1.0;
-                        break;
-                    default:
-                        break;
+                case 1:{
+                    uw[0] = 1.0;
+                    break;
                 }
-            }
-            
-            double uwn = uwx*nf.x+uwy*nf.y;
-
-            // 反射边界条件
-            for(size_t vi=0;vi<Nv;vi++) {
-                double cn=nf.x*Vx[vi]+nf.y*Vy[vi];
-                if (cn<0.0) {
-                    int idx_neigh = index_vdf(neigh,vi);
-                    double udotv = uwx*Vx[vi]+uwy*Vy[vi];
-                    scalar temp = rhor -sqrtPI*uwn + 2.0*udotv;
-                    vdf[idx_neigh] = temp;
+                case 2:{
+                    uw[1] = 1.0;
+                    break;
                 }
+                default:
+                    break;
             }
+            diffuseWall(facei, uw[0], uw[1]);
         }
     }
 }

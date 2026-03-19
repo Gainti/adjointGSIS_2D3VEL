@@ -73,5 +73,8 @@ public:
     void reportProfile() const {
         profiler.report(comm, rank, "[DVM profile summary]");
     }
+
+private:
+    void diffuseWall(int facei, double uwx, double uwy);
 };
 #endif //DVMSOLVER_H

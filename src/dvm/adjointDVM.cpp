@@ -67,47 +67,75 @@ void adjointDVM::updateAdjMacro() {
     res_auy  = std::sqrt(up_global[2] / std::max(down_global[2], eps));
     res_atau = std::sqrt(up_global[3] / std::max(down_global[3], eps));
 }
-// TODO: 目前定义m为2*Vx
-void adjointDVM::adjointBoundarySet() {
-    const auto& faces = mesh.faces;
-    for(int facei=mesh.nInternalFaces;facei<mesh.nFaces;facei++){
-        if(faces[facei].bc_type==BCType::wall ||
-        faces[facei].bc_type==BCType::pressure_far_field){
-            int owner=faces[facei].owner;
-            int neigh=faces[facei].neigh;
-            const vector& Sf=faces[facei].Sf;
-            double magSf=Sf.mag();
-            vector nf= Sf/magSf;
-            
-            // 积分获得rhor
-            scalar rhor=Zero;
-            for(int vi=0;vi<Nv;vi++) {
-                double cn=nf.x*Vx[vi]+nf.y*Vy[vi];
-                if (cn<0.0) {
-                    int idx_owner = index_vdf(owner,vi);
-                    int idx_neigh = index_vdf(neigh,vi);
-                    avdf[idx_neigh] = avdf[idx_owner];
-                    double m=0.0;
-                    if(faces[facei].bc_type==BCType::pressure_far_field){
-                        m=2.0*Vx[vi];
-                    }
-                    rhor+=cn*feq[vi]*(avdf[idx_neigh]+m)*weight[vi];
-                }
-            }
 
-            // 反射边界条件
-            for(size_t vi=0;vi<Nv;vi++) {
-                double cn=nf.x*Vx[vi]+nf.y*Vy[vi];
-                if (cn>0.0) {
-                    int idx_neigh = index_vdf(neigh,vi);
-                    double m=0.0;
-                    if(faces[facei].bc_type==BCType::pressure_far_field){
-                        m=2.0*Vx[vi];
-                    }
-                    double temp = -m-2.0*sqrtPI*rhor;
-                    avdf[idx_neigh] = temp;
-                }
-            }
+void adjointDVM::diffuseWall(int facei) {
+    const auto& face = mesh.faces[facei];
+    int owner = face.owner;
+    int neigh = face.neigh;
+
+    const vector& Sf = face.Sf;
+    vector nf = Sf / Sf.mag();
+
+    scalar rhor = Zero;
+    for (int vi = 0; vi < Nv; vi++) {
+        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (cn < 0.0) {
+            int idx_owner = index_vdf(owner, vi);
+            int idx_neigh = index_vdf(neigh, vi);
+            avdf[idx_neigh] = avdf[idx_owner];
+            double m = 0.0;
+            rhor += cn * feq[vi] * (avdf[idx_neigh] + m) * weight[vi];
+        }
+    }
+
+    for (int vi = 0; vi < Nv; vi++) {
+        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (cn > 0.0) {
+            int idx_neigh = index_vdf(neigh, vi);
+            double m = 0.0;
+            double temp = -m - 2.0 * sqrtPI * rhor;
+            avdf[idx_neigh] = temp;
+        }
+    }
+}
+void adjointDVM::diffuseWallwithObject(int facei) {
+    const auto& face = mesh.faces[facei];
+    int owner = face.owner;
+    int neigh = face.neigh;
+
+    const vector& Sf = face.Sf;
+    vector nf = Sf / Sf.mag();
+
+    scalar rhor = Zero;
+    for (int vi = 0; vi < Nv; vi++) {
+        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (cn < 0.0) {
+            int idx_owner = index_vdf(owner, vi);
+            int idx_neigh = index_vdf(neigh, vi);
+            avdf[idx_neigh] = avdf[idx_owner];
+
+            double m = objectiveWeight(Vx[vi], Vy[vi]);
+            rhor += cn * feq[vi] * (avdf[idx_neigh] + m) * weight[vi];
+        }
+    }
+
+    for (int vi = 0; vi < Nv; vi++) {
+        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (cn > 0.0) {
+            int idx_neigh = index_vdf(neigh, vi);
+            double m = objectiveWeight(Vx[vi], Vy[vi]);
+            double temp = -m - 2.0 * sqrtPI * rhor;
+            avdf[idx_neigh] = temp;
+        }
+    }
+}
+void adjointDVM::adjointBoundarySet() {
+    for (int facei = mesh.nInternalFaces; facei < mesh.nFaces; facei++) {
+        const auto bcType = mesh.faces[facei].bc_type;
+        if (bcType == BCType::wall) {
+            diffuseWall(facei);
+        } else if (bcType == BCType::pressure_far_field) {
+            diffuseWallwithObject(facei);
         }
     }
 }

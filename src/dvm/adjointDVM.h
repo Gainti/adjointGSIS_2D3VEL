@@ -3,6 +3,7 @@
 
 #include "dvmSolver.h"
 #include <vector>
+#include "object.h"
 
 class adjointDVM {
 public:
@@ -39,6 +40,10 @@ public:
     void cellIterAdj(int cellI);
     void lusgsIterAdj();
     void step(int iter);
+
+private:
+    void diffuseWall(int facei);
+    void diffuseWallwithObject(int facei);
 };
 
 #endif // ADJOINT_DVM_H
