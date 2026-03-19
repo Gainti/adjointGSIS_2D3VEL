@@ -46,41 +46,6 @@ double localReferenceLength(const Mesh& mesh, int point_id)
     return s / (double)cnt;
 }
 
-double computeBoundaryObjective(
-    dvmSolver& solver,
-    const BoundaryFunctional& obj)
-{
-    const auto& mesh = solver.mesh;
-    double J_local = 0.0;
-
-    for (int facei = mesh.nInternalFaces; facei < mesh.nFaces; ++facei) {
-        const auto& f = mesh.faces[facei];
-        if (f.bc_type != BCType::wall &&
-            f.bc_type != BCType::pressure_far_field) {
-            continue;
-        }
-
-        double A = f.Sf.mag();
-        vector nf = f.Sf / A;
-        int ghost = f.neigh;
-
-        for (int vi = 0; vi < solver.Nv; ++vi) {
-            double cn = nf.x * solver.Vx[vi] + nf.y * solver.Vy[vi];
-            int idx_g = solver.index_vdf(ghost, vi);
-
-            double h = solver.vdf[idx_g];
-            double m = (cn > 0.0) ? obj.mPlus(solver, facei, vi)
-                                  : obj.mMinus(solver, facei, vi);
-
-            J_local += A * cn * m * h * solver.feq[vi] * solver.weight[vi];
-        }
-    }
-
-    double J_global = 0.0;
-    MPI_Allreduce(&J_local, &J_global, 1, MPI_DOUBLE, MPI_SUM, solver.comm);
-    return J_global;
-}
-
 /* ============================================================
  * 目标函数
  * J = 扰动点附近 owner 单元的平均宏观量
@@ -105,9 +70,7 @@ double runPrimalAndEvalJ(const Mesh& mesh,
             break;
         }
     }
-
-    XForceFunctional obj;
-    return computeBoundaryObjective(solver, obj);
+    return computeObjective(solver);
 
 }
 
@@ -168,16 +131,15 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
         }
     }
 
-    XForceFunctional obj;
     BoundarySensitivityAssembler assembler;
 
     std::vector<FaceGeomGrad> faceGrad;
     std::vector<NodeGrad> nodeGrad;
 
-    assembler.assembleFaceGradients(solver, obj, faceGrad);
+    assembler.assembleFaceGradients(solver, faceGrad);
     assembler.accumulateNodeGradients(base_mesh, faceGrad, nodeGrad);
 
-    double J0 = computeBoundaryObjective(solver, obj);
+    double J0 = computeObjective(solver);
     g_adj = (validate_coord == 0) ? nodeGrad[validate_point].dx : nodeGrad[validate_point].dy;
 
     // FD

@@ -45,7 +45,7 @@ void dvmSolver::updateAdjMacro() {
     res_auy  = std::sqrt(up_global[2] / std::max(down_global[2], eps));
     res_atau = std::sqrt(up_global[3] / std::max(down_global[3], eps));
 }
-// TODO: 目前定义m为Vx
+// TODO: 目前定义m为2*Vx
 void dvmSolver::adjointBoundarySet() {
     const auto& faces = mesh.faces;
     for(int facei=mesh.nInternalFaces;facei<mesh.nFaces;facei++){

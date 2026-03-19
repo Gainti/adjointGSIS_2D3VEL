@@ -6,28 +6,6 @@
 #include <array>
 
 // =========================
-// objective
-// =========================
-double XForceFunctional::mPlus(const dvmSolver& solver, int facei, int vi) const
-{
-    const auto& mesh=solver.mesh;
-    if(mesh.faces[facei].bc_type==BCType::pressure_far_field){
-        return 2.0 * solver.Vx[vi];
-    }
-    return 0.0;
-
-}
-
-double XForceFunctional::mMinus(const dvmSolver& solver, int facei, int vi) const
-{
-    const auto& mesh=solver.mesh;
-    if(mesh.faces[facei].bc_type==BCType::pressure_far_field){
-        return 2.0 * solver.Vx[vi];
-    }
-    return 0.0;
-}
-
-// =========================
 // geometry derivatives
 // =========================
 EdgeGeomDeriv2D computeEdgeGeomDeriv2D(const vector& r1, const vector& r2)
@@ -201,7 +179,6 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
 void BoundarySensitivityAssembler::accumulate_dJdA_dJdn(
     dvmSolver& solver,
     int facei,
-    const BoundaryFunctional& obj,
     FaceGeomGrad& g)
 {
     const auto& f = solver.mesh.faces[facei];
@@ -213,19 +190,19 @@ void BoundarySensitivityAssembler::accumulate_dJdA_dJdn(
     double dJdA = 0.0;
     double dJdn[2] = {0.0, 0.0};
 
-    for (int vi = 0; vi < solver.Nv; ++vi) {
-        double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+    if(f.bc_type == BCType::pressure_far_field) {
+        for (int vi = 0; vi < solver.Nv; ++vi) {
+            double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+    
+            double h = solver.vdf[neigh*solver.Nv + vi];
+            double m = objectiveWeight(solver.Vx[vi], solver.Vy[vi]);
 
-        double h = solver.vdf[neigh*solver.Nv + vi];
-        double m = (cn > 0.0) ? obj.mPlus(solver, facei, vi)
-                              : obj.mMinus(solver, facei, vi);
-
-        double w = solver.feq[vi] * solver.weight[vi];
-
-
-        dJdA += cn * m * h * w;
-        dJdn[0] += A * m * h * solver.Vx[vi] * w;
-        dJdn[1] += A * m * h * solver.Vy[vi] * w;
+            double w = solver.feq[vi] * solver.weight[vi];
+    
+            dJdA += cn * m * h * w;
+            dJdn[0] += A * m * h * solver.Vx[vi] * w;
+            dJdn[1] += A * m * h * solver.Vy[vi] * w;
+        }
     }
 
     g.dJdA = dJdA;
@@ -239,7 +216,6 @@ void BoundarySensitivityAssembler::accumulate_dJdA_dJdn(
 void BoundarySensitivityAssembler::accumulate_dJdC(
     dvmSolver& solver,
     int facei,
-    const BoundaryFunctional& obj,
     const std::vector<double>& gradHx,
     const std::vector<double>& gradHy,
     FaceGeomGrad& g)
@@ -255,16 +231,17 @@ void BoundarySensitivityAssembler::accumulate_dJdC(
 
     double dJdC[2] = {0.0, 0.0};
 
-    for (int vi = 0; vi < solver.Nv; ++vi) {
-        double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
-        double m  = (cn > 0.0) ? obj.mPlus(solver, facei, vi)
-                               : obj.mMinus(solver, facei, vi);
-
-        double coeff = A*cn*m*solver.feq[vi] * solver.weight[vi];
-
-        dJdC[0] += coeff * gradHx[vi];
-        dJdC[1] += coeff * gradHy[vi];
-     }
+    if(f.bc_type == BCType::pressure_far_field){
+        for (int vi = 0; vi < solver.Nv; ++vi) {
+            double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+            double m  = objectiveWeight(solver.Vx[vi], solver.Vy[vi]);
+    
+            double coeff = A*cn*m*solver.feq[vi] * solver.weight[vi];
+    
+            dJdC[0] += coeff * gradHx[vi];
+            dJdC[1] += coeff * gradHy[vi];
+         }
+    }
 
     g.dJdC[0] = dJdC[0];
     g.dJdC[1] = dJdC[1];
@@ -276,7 +253,6 @@ void BoundarySensitivityAssembler::accumulate_dJdC(
 void BoundarySensitivityAssembler::accumulate_dBwdn(
     dvmSolver& solver,
     int facei,
-    const BoundaryFunctional& obj,
     FaceGeomGrad& g)
 {
     const auto& f = solver.mesh.faces[facei];
@@ -299,19 +275,35 @@ void BoundarySensitivityAssembler::accumulate_dBwdn(
     }
 
     double dBwdn[2] = {0.0, 0.0};
-    for (int vi = 0; vi < solver.Nv; ++vi) {
-        double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
-        if (cn >= 0.0) continue;
-
-        double phi_minus = solver.avdf[neigh*solver.Nv + vi];
-        double mminus = obj.mMinus(solver, facei, vi);
-        double lambda = -cn * (phi_minus + mminus);
-
-        double w = solver.feq[vi] * solver.weight[vi];
-        auto dhbdn = DiffuseBoundaryModel::dhb_dn(solver, facei, vi);
-        dBwdn[0] += lambda * (-dKdn[0] - dhbdn[0]) * w;
-        dBwdn[1] += lambda * (-dKdn[1] - dhbdn[1]) * w;
-
+    if(f.bc_type == BCType::pressure_far_field) {
+        for (int vi = 0; vi < solver.Nv; ++vi) {
+            double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+            if (cn >= 0.0) continue;
+    
+            double phi = solver.avdf[neigh*solver.Nv + vi];
+            double m = objectiveWeight(solver.Vx[vi], solver.Vy[vi]);
+            double lambda = -cn * (phi + m);
+    
+            double w = solver.feq[vi] * solver.weight[vi];
+            auto dhbdn = DiffuseBoundaryModel::dhb_dn(solver, facei, vi);
+            dBwdn[0] += lambda * (-dKdn[0] - dhbdn[0]) * w;
+            dBwdn[1] += lambda * (-dKdn[1] - dhbdn[1]) * w;
+    
+        }
+    }else if(f.bc_type == BCType::wall) {
+        for (int vi = 0; vi < solver.Nv; ++vi) {
+            double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+            if (cn >= 0.0) continue;
+    
+            double phi_minus = solver.avdf[neigh*solver.Nv + vi];
+            double lambda = -cn * phi_minus;
+    
+            double w = solver.feq[vi] * solver.weight[vi];
+            auto dhbdn = DiffuseBoundaryModel::dhb_dn(solver, facei, vi);
+            dBwdn[0] += lambda * (-dKdn[0] - dhbdn[0]) * w;
+            dBwdn[1] += lambda * (-dKdn[1] - dhbdn[1]) * w;
+    
+        }
     }
     g.dBwdn[0] = A * dBwdn[0];
     g.dBwdn[1] = A * dBwdn[1];
@@ -323,7 +315,6 @@ void BoundarySensitivityAssembler::accumulate_dBwdn(
 void BoundarySensitivityAssembler::accumulate_dBwdC(
     dvmSolver& solver,
     int facei,
-    const BoundaryFunctional& obj,
     const std::vector<double>& gradHx,
     const std::vector<double>& gradHy,
     FaceGeomGrad& g)
@@ -348,18 +339,33 @@ void BoundarySensitivityAssembler::accumulate_dBwdC(
 
     // dBw/dC
     double dBwdC[2] = {0.0, 0.0};
-    for (int vi = 0; vi < solver.Nv; ++vi) {
-        double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
-        if (cn >= 0.0) continue;
-
-        double phi_minus = solver.avdf[neigh*solver.Nv + vi];
-        double mminus = obj.mMinus(solver, facei, vi);
-        double lambda = -cn * (phi_minus + mminus);
-
-        double w = solver.feq[vi] * solver.weight[vi];
-
-        dBwdC[0] += lambda * (gradHx[vi] - dKdC[0]) * w;
-        dBwdC[1] += lambda * (gradHy[vi] - dKdC[1]) * w;
+    if(f.bc_type == BCType::pressure_far_field) {
+        for (int vi = 0; vi < solver.Nv; ++vi) {
+            double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+            if (cn >= 0.0) continue;
+    
+            double phi = solver.avdf[neigh*solver.Nv + vi];
+            double m = objectiveWeight(solver.Vx[vi], solver.Vy[vi]);
+            double lambda = -cn * (phi + m);
+    
+            double w = solver.feq[vi] * solver.weight[vi];
+    
+            dBwdC[0] += lambda * (gradHx[vi] - dKdC[0]) * w;
+            dBwdC[1] += lambda * (gradHy[vi] - dKdC[1]) * w;
+        }
+    }else if(f.bc_type == BCType::wall) {
+        for (int vi = 0; vi < solver.Nv; ++vi) {
+            double cn = nf.x*solver.Vx[vi] + nf.y*solver.Vy[vi];
+            if (cn >= 0.0) continue;
+    
+            double phi = solver.avdf[neigh*solver.Nv + vi];
+            double lambda = -cn * phi;
+    
+            double w = solver.feq[vi] * solver.weight[vi];
+    
+            dBwdC[0] += lambda * (gradHx[vi] - dKdC[0]) * w;
+            dBwdC[1] += lambda * (gradHy[vi] - dKdC[1]) * w;
+        }
     }
     g.dBwdC[0] = A * dBwdC[0];
     g.dBwdC[1] = A * dBwdC[1];
@@ -370,7 +376,6 @@ void BoundarySensitivityAssembler::accumulate_dBwdC(
 // =========================
 void BoundarySensitivityAssembler::assembleFaceGradients(
     dvmSolver& solver,
-    const BoundaryFunctional& obj,
     std::vector<FaceGeomGrad>& faceGrad)
 {
     const auto& mesh = solver.mesh;
@@ -397,12 +402,12 @@ void BoundarySensitivityAssembler::assembleFaceGradients(
         computeOwnerCellGradient(solver, owner, ownerGradHx, ownerGradHy);
 
         // objective terms
-        accumulate_dJdA_dJdn(solver, facei, obj, g);
-        accumulate_dJdC(solver, facei, obj, ownerGradHx, ownerGradHy, g);
+        accumulate_dJdA_dJdn(solver, facei, g);
+        accumulate_dJdC(solver, facei, ownerGradHx, ownerGradHy, g);
 
         // boundary constraint terms
-        accumulate_dBwdn(solver, facei, obj, g);
-        accumulate_dBwdC(solver, facei, obj, ownerGradHx, ownerGradHy, g);
+        accumulate_dBwdn(solver, facei, g);
+        accumulate_dBwdC(solver, facei, ownerGradHx, ownerGradHy, g);
 
         // sum
         g.dLdA = g.dJdA;

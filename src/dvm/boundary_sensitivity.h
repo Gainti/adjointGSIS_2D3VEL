@@ -5,6 +5,7 @@
 #include "dvmSolver.h"
 #include <array>
 #include <vector>
+#include "object.h"
 
 struct FaceGeomGrad
 {
@@ -42,24 +43,6 @@ struct EdgeGeomDeriv2D
 EdgeGeomDeriv2D computeEdgeGeomDeriv2D(const vector& r1, const vector& r2);
 
 // =========================
-// 目标函数接口
-// =========================
-class BoundaryFunctional
-{
-public:
-    virtual ~BoundaryFunctional() = default;
-    virtual double mPlus(const dvmSolver& solver, int facei, int vi) const = 0;
-    virtual double mMinus(const dvmSolver& solver, int facei, int vi) const = 0;
-};
-
-class XForceFunctional : public BoundaryFunctional
-{
-public:
-    double mPlus(const dvmSolver& solver, int facei, int vi) const override;
-    double mMinus(const dvmSolver& solver, int facei, int vi) const override;
-};
-
-// =========================
 // 边界模型
 // =========================
 class DiffuseBoundaryModel
@@ -92,7 +75,6 @@ class BoundarySensitivityAssembler
 public:
     static void assembleFaceGradients(
         dvmSolver& solver,
-        const BoundaryFunctional& obj,
         std::vector<FaceGeomGrad>& faceGrad);
 
     static void accumulateNodeGradients(
@@ -111,13 +93,11 @@ private:
     static void accumulate_dJdA_dJdn(
         dvmSolver& solver,
         int facei,
-        const BoundaryFunctional& obj,
         FaceGeomGrad& g);
 
     static void accumulate_dJdC(
         dvmSolver& solver,
         int facei,
-        const BoundaryFunctional& obj,
         const std::vector<double>& gradHx,
         const std::vector<double>& gradHy,
         FaceGeomGrad& g);
@@ -125,13 +105,11 @@ private:
     static void accumulate_dBwdn(
         dvmSolver& solver,
         int facei,
-        const BoundaryFunctional& obj,
         FaceGeomGrad& g);
 
     static void accumulate_dBwdC(
         dvmSolver& solver,
         int facei,
-        const BoundaryFunctional& obj,
         const std::vector<double>& gradHx,
         const std::vector<double>& gradHy,
         FaceGeomGrad& g);

@@ -34,6 +34,7 @@ add_executable(solver
     src/mesh/mesh.cpp
     src/core/utils.cpp
     src/dvm/dvmSolver.cpp
+    src/core/object.cpp
     src/io/output.cpp
     src/mesh/partition.cpp
     src/mesh/halo.cpp

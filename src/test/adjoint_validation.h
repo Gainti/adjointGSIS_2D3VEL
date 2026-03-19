@@ -9,8 +9,9 @@
 #include <vector>
 #include <string>
 
+
+#include "object.h"
 #include "boundary_sensitivity.h"
-#include "object.hpp"
 
 bool isBoundaryFace(const Face& f);
 std::vector<int> collectBoundaryPoints(const Mesh& mesh);
