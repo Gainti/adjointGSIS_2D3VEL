@@ -9,7 +9,7 @@
 #include <vector>
 #include <string>
 
-
+#include "velocitySpace.h"
 #include "object.h"
 #include "boundary_sensitivity.h"
 
@@ -22,16 +22,16 @@ bool recomputeMeshGeometry(Mesh& mesh);
 
 // 跑一次 primal，返回目标函数 J
 double runPrimalAndEvalJ(const Mesh& mesh,
-                         const SolverConfig& cfg,
-                         MPI_Comm comm,
-                         int point_id,
-                         int macro_comp);
+    const VelocitySpace& vel,
+    const SolverConfig& cfg,
+    MPI_Comm comm);
 
 // 只动一个点的一个坐标分量
 void perturbOnePoint(Mesh& mesh, int point_id, int coord, double ds);
 
 // 有限差分验证主入口
 bool validateOneBoundaryPoint(const Mesh& base_mesh,
+                    const VelocitySpace& vel,
                     const SolverConfig& cfg,
                     MPI_Comm comm);
 

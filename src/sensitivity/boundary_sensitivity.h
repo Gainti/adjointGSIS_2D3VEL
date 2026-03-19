@@ -3,6 +3,7 @@
 
 #include "mesh.h"
 #include "dvmSolver.h"
+#include "adjointDVM.h"
 #include <array>
 #include <vector>
 #include "object.h"
@@ -55,16 +56,16 @@ public:
     };
 
     static KernelGrad computeKernelAndGradN(
-        dvmSolver& solver, int facei, int owner);
+        dvmSolver& primal, int facei, int owner);
 
     static std::array<double,2> wallVelocity(
-        dvmSolver& solver, int facei);
+        dvmSolver& primal, int facei);
 
     static double hb(
-        dvmSolver& solver, int facei, int vi);
+        dvmSolver& primal, int facei, int vi);
 
     static std::array<double,2> dhb_dn(
-        dvmSolver& solver, int facei, int vi);
+        dvmSolver& primal, int facei, int vi);
 };
 
 // =========================
@@ -74,7 +75,8 @@ class BoundarySensitivityAssembler
 {
 public:
     static void assembleFaceGradients(
-        dvmSolver& solver,
+        dvmSolver& primal,
+        const adjointDVM& adjoint,
         std::vector<FaceGeomGrad>& faceGrad);
 
     static void accumulateNodeGradients(
@@ -85,30 +87,32 @@ public:
 private:
     // 只为当前 owner 单元计算所有速度点梯度
     static void computeOwnerCellGradient(
-        dvmSolver& solver,
+        dvmSolver& primal,
         int owner,
         std::vector<double>& gradHx,
         std::vector<double>& gradHy);
 
     static void accumulate_dJdA_dJdn(
-        dvmSolver& solver,
+        dvmSolver& primal,
         int facei,
         FaceGeomGrad& g);
 
     static void accumulate_dJdC(
-        dvmSolver& solver,
+        dvmSolver& primal,
         int facei,
         const std::vector<double>& gradHx,
         const std::vector<double>& gradHy,
         FaceGeomGrad& g);
 
     static void accumulate_dBwdn(
-        dvmSolver& solver,
+        dvmSolver& primal,
+        const adjointDVM& adjoint,
         int facei,
         FaceGeomGrad& g);
 
     static void accumulate_dBwdC(
-        dvmSolver& solver,
+        dvmSolver& primal,
+        const adjointDVM& adjoint,
         int facei,
         const std::vector<double>& gradHx,
         const std::vector<double>& gradHy,

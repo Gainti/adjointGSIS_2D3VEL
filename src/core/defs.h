@@ -1,5 +1,10 @@
 #pragma once
 
+constexpr int dim = 2;
+constexpr int Nmacro = 10; // rho,ux,uy,tau,qx,qy,pxx,pxy,pyx,pyy
+constexpr int Nhot = 6; // stress_{xx,xy,yx,yy} + heat_{x,y}
+constexpr int Namacro = 6; // rho, aux, auy, atau, aqx, aqy
+
 struct SolverConfig {
     // constant
     int uwall=0;// 0: shear ; 1: x direction ; 2: y direction

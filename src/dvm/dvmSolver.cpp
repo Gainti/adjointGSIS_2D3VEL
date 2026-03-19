@@ -1,27 +1,30 @@
 #include "dvmSolver.h"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <vector>
 
 dvmSolver::dvmSolver(const Mesh& mesh,
+    const VelocitySpace& vel,
     const SolverConfig& cfg,
     MPI_Comm comm
 )
     :mesh(mesh),
     cfg(cfg),
     comm(comm),
-    Nv(cfg.Nv)
+    Nv(cfg.Nv),
+    Vx(vel.Vx),
+    Vy(vel.Vy),
+    Vz(vel.Vz),
+    weight(vel.weight),
+    c2(vel.c2),
+    feq(vel.feq),
+    exp_c2(vel.exp_c2),
+    weight_macro(vel.weight_macro)
 {
     MPI_Comm_rank(comm,&rank);
     MPI_Comm_size(comm,&size);
-    initial();
-}
-void dvmSolver::initial() {
-    nonUniform(vx,weight_x,cfg.Nvx,cfg.Lvx);
-    nonUniform(vy,weight_y,cfg.Nvy,cfg.Lvy);
-    // nonUniform(vz,weight_z,cfg.Nvz,cfg.Lvz);
-    uniform(vz,weight_z,cfg.Nvz,cfg.Lvz);
-    allocateVelSpace();
 
     // 为分布函数分配空间
     // 不仅存储单元内的值，还存储边界面的值
@@ -44,91 +47,10 @@ void dvmSolver::initial() {
 
     boundarySet();
     updateMacro();
-
     initHaloWorkspace(mesh, halo_ws, Nv);
-}
-bool dvmSolver::allocateVelSpace() 
-{
-    // 分配空间
-    if(Nv!=vx.size()*vy.size()*vz.size()){
-        printf("Error: Inconsistent velocity space dimensions\n\n");
-        return false;
-    }
-    Vx.resize(Nv);Vy.resize(Nv);Vz.resize(Nv);
-    weight.resize(Nv);
-    c2.resize(Nv);
-    feq.resize(Nv);
-    exp_c2.resize(Nv);
 
-    size_t ip=0;
-    for(size_t ipz=0; ipz<vz.size();ipz++){
-        for (size_t ipy=0; ipy<vy.size();ipy++) {
-            for (size_t ipx=0;ipx<vx.size();ipx++) {
-                Vx[ip]=vx[ipx];
-                Vy[ip]=vy[ipy];
-                Vz[ip]=vz[ipz];
-                weight[ip]=weight_x[ipx]*weight_y[ipy]*weight_z[ipz];
-                ip++;
-            }
-        }
-    }
-
-    // c2, feq ,exp(-c2)
-    for (size_t vi=0;vi<Nv;vi++) {
-        // c2= vx^2+vy^2+vz^2
-        c2[vi]=Vx[vi]*Vx[vi]+Vy[vi]*Vy[vi]+Vz[vi]*Vz[vi];
-        // feq= exp(-c2)/pi
-        feq[vi]= std::exp(-c2[vi])/PI/sqrtPI;
-        // exp(-c2)
-        exp_c2[vi]=std::exp(-c2[vi]);
-    }
-    //
-    weight_macro.resize(Nv);
-    for (size_t vi=0;vi<Nv;vi++) {
-        double fw = feq[vi]*weight[vi];
-        weight_macro[vi][0]  = fw;
-        weight_macro[vi][1]  = fw * Vx[vi];
-        weight_macro[vi][2]  = fw * Vy[vi];
-        weight_macro[vi][3]  = fw * (2.0*c2[vi]/3.0 - 1.0);
-        weight_macro[vi][4] = fw * (c2[vi] - 2.5) * Vx[vi];
-        weight_macro[vi][5] = fw * (c2[vi] - 2.5) * Vy[vi];
-        weight_macro[vi][6] = fw * 2.0 * (Vx[vi]*Vx[vi] - c2[vi]/3.0);
-        weight_macro[vi][7] = fw * 2.0 * Vx[vi] * Vy[vi];
-        weight_macro[vi][8] = fw * 2.0 * Vx[vi] * Vy[vi];
-        weight_macro[vi][9] = fw * 2.0 * (Vy[vi]*Vy[vi] - c2[vi]/3.0);
-    }
-    return true;
 }
-void uniform(std::vector<double> &vi,
-    std::vector<double> &weight_i,
-    size_t Nvi,
-    double Lvi)
-{
-    // 分配空间
-    vi.resize(Nvi);
-    weight_i.resize(Nvi);
 
-    double dx=2.0*Lvi/static_cast<double>(Nvi-1);
-    for (size_t ipx=0;ipx<Nvi;ipx++) {
-        vi[ipx]=-Lvi+dx*ipx;
-        weight_i[ipx]=dx;
-    }
-}
-void nonUniform(std::vector<double> &vi,
-                        std::vector<double> &weight_i,
-                        size_t Nvi,
-                        double Lvi)
-{
-    // 分配空间
-    vi.resize(Nvi);
-    weight_i.resize(Nvi);
-
-    for (size_t ipx=0;ipx<Nvi;ipx++) {
-        int ix=2*ipx-(Nvi-1);
-        vi[ipx]=Lvi*std::pow(ix,3)/std::pow(Nvi-1,3);
-        weight_i[ipx]=6.0*Lvi*std::pow(ix,2)/std::pow(Nvi-1,3);
-    }
-}
 void dvmSolver::boundarySet() {
     ScopedTimer timer(profiler, DvmTimerID::BoundarySet);
 

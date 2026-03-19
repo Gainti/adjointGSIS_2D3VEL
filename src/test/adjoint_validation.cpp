@@ -46,18 +46,12 @@ double localReferenceLength(const Mesh& mesh, int point_id)
     return s / (double)cnt;
 }
 
-/* ============================================================
- * 目标函数
- * J = 扰动点附近 owner 单元的平均宏观量
- * macro_comp: 0=rho, 1=ux, 2=uy
- * ============================================================ */
-
 double runPrimalAndEvalJ(const Mesh& mesh,
-                         const SolverConfig& cfg,
-                         MPI_Comm comm,
-                         int point_id)
+                        const VelocitySpace& vel,
+                        const SolverConfig& cfg,
+                        MPI_Comm comm)
 {
-    dvmSolver solver(mesh, cfg, comm);
+    dvmSolver solver(mesh, vel, cfg, comm);
 
     for (int iter = 0; iter < cfg.max_iter; ++iter)
     {
@@ -89,6 +83,7 @@ void perturbOnePoint(Mesh& mesh, int point_id, int coord, double ds)
  * ============================================================ */
 
 bool validateOneBoundaryPoint(const Mesh& base_mesh,
+                        const VelocitySpace& vel,
                         const SolverConfig& cfg,
                         MPI_Comm comm)
 {
@@ -103,7 +98,7 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
 
     // ADJ
     double g_adj = 0.0;
-    dvmSolver solver(base_mesh, cfg, comm);
+    dvmSolver solver(base_mesh, vel, cfg, comm);
 
     for (int iter = 1; iter < cfg.max_iter; ++iter)
     {
@@ -117,15 +112,15 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
         }
     }
 
-    solver.initialAdj();
+    adjointDVM adj(solver);
 
     for (int iter = 1; iter < cfg.max_iter; ++iter)
     {
-        solver.stepAdj(iter);
+        adj.step(iter);
 
-        if (solver.res_arho < cfg.tol &&
-            solver.res_aux  < cfg.tol &&
-            solver.res_auy  < cfg.tol)
+        if (adj.res_arho < cfg.tol &&
+            adj.res_aux  < cfg.tol &&
+            adj.res_auy  < cfg.tol)
         {
             break;
         }
@@ -136,7 +131,7 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
     std::vector<FaceGeomGrad> faceGrad;
     std::vector<NodeGrad> nodeGrad;
 
-    assembler.assembleFaceGradients(solver, faceGrad);
+    assembler.assembleFaceGradients(solver, adj, faceGrad);
     assembler.accumulateNodeGradients(base_mesh, faceGrad, nodeGrad);
 
     double J0 = computeObjective(solver);
@@ -152,8 +147,8 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
     computeGeometry(plus_mesh, comm);
     computeGeometry(minus_mesh, comm);
 
-    const double Jp = runPrimalAndEvalJ(plus_mesh,  cfg, comm, validate_point);
-    const double Jm = runPrimalAndEvalJ(minus_mesh, cfg, comm, validate_point);
+    const double Jp = runPrimalAndEvalJ(plus_mesh, vel, cfg, comm);
+    const double Jm = runPrimalAndEvalJ(minus_mesh, vel, cfg, comm);
     const double g_fd   = (Jp - Jm) / (2.0 * eps);
 
     // compare with adjoint gradient

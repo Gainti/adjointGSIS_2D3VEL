@@ -34,6 +34,7 @@ add_executable(solver
     src/mesh/mesh.cpp
     src/core/utils.cpp
     src/dvm/dvmSolver.cpp
+    src/dvm/velocitySpace.cpp
     src/core/object.cpp
     src/io/output.cpp
     src/mesh/partition.cpp
@@ -41,7 +42,7 @@ add_executable(solver
     src/mesh/computeGeometry.cpp
     src/mesh/meshDeform.cpp
     src/dvm/adjointDVM.cpp
-    src/dvm/boundary_sensitivity.cpp
+    src/sensitivity/boundary_sensitivity.cpp
     # src/test/geom_chain_validation.cpp
     src/test/adjoint_validation.cpp
 )
@@ -52,6 +53,7 @@ target_include_directories(solver PUBLIC
     src/io 
     src/mesh 
     src/dvm
+    src/sensitivity
     src/test
     ${METIS_INCLUDE_DIR}
     ${GK_INCLUDE_DIR}

@@ -1,14 +1,36 @@
-#include "dvmSolver.h"
+#include "adjointDVM.h"
 
-void dvmSolver::initialAdj(){
-    avdf.resize(Nv*(mesh.nCells+mesh.nBoundaryFaces), Zero);
-    arhs.resize(Nv*(mesh.nCells+mesh.nBoundaryFaces), Zero);
-    amacro.resize((mesh.nCells+mesh.nBoundaryFaces)*Namacro, Zero);
+#include <algorithm>
+#include <cmath>
+
+adjointDVM::adjointDVM(dvmSolver& primal)
+    : primal(primal),
+      mesh(primal.mesh),
+      cfg(primal.cfg),
+      comm(primal.comm),
+      rank(primal.rank),
+      size(primal.size),
+      Nv(primal.Nv),
+      Vx(primal.Vx),
+      Vy(primal.Vy),
+      c2(primal.c2),
+      feq(primal.feq),
+      weight(primal.weight),
+      invdt(primal.invdt),
+      res_aux(0.0),
+      res_auy(0.0),
+      res_arho(0.0),
+      res_atau(0.0)
+{
+    avdf.resize(Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
+    arhs.resize(Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
+    amacro.resize((mesh.nCells + mesh.nBoundaryFaces) * Namacro, Zero);
 
     adjointBoundarySet();
     updateAdjMacro();
 }
-void dvmSolver::updateAdjMacro() {
+
+void adjointDVM::updateAdjMacro() {
     double up_local[4]={0.0},down_local[4]={0.0};
     for(size_t cellI=0; cellI<mesh.nCells+mesh.nBoundaryFaces; ++cellI) {
         scalar a[6] = {Zero};
@@ -46,7 +68,7 @@ void dvmSolver::updateAdjMacro() {
     res_atau = std::sqrt(up_global[3] / std::max(down_global[3], eps));
 }
 // TODO: 目前定义m为2*Vx
-void dvmSolver::adjointBoundarySet() {
+void adjointDVM::adjointBoundarySet() {
     const auto& faces = mesh.faces;
     for(int facei=mesh.nInternalFaces;facei<mesh.nFaces;facei++){
         if(faces[facei].bc_type==BCType::wall ||
@@ -89,7 +111,7 @@ void dvmSolver::adjointBoundarySet() {
         }
     }
 }
-void dvmSolver::getAdjRhs() {
+void adjointDVM::getAdjRhs() {
     std::fill(arhs.begin(), arhs.end(), Zero);
 
     for(size_t cellI=0; cellI<mesh.nOwned; ++cellI) {
@@ -113,7 +135,7 @@ void dvmSolver::getAdjRhs() {
         }
     }
 }
-void dvmSolver::cellIterAdj(int cellI) {
+void adjointDVM::cellIterAdj(int cellI) {
     if(cellI >= mesh.nOwned) return;
 
     const auto& cell  = mesh.cells[cellI];
@@ -157,7 +179,7 @@ void dvmSolver::cellIterAdj(int cellI) {
         avdf[idx_cell]   = (arhs[idx_cell]   + res) / diag;
     }
 }
-void dvmSolver::lusgsIterAdj() {
+void adjointDVM::lusgsIterAdj() {
     for(size_t iter=0;iter<5;iter++){
         for(int cellI=0;cellI<mesh.nOwned;cellI++) {
             cellIterAdj(cellI);
@@ -167,7 +189,7 @@ void dvmSolver::lusgsIterAdj() {
         }
     }
 }
-void dvmSolver::stepAdj(int iter){
+void adjointDVM::step(int iter){
     // rhs 只组装 owned
     getAdjRhs();
     // 本地 LU-SGS + halo 同步

@@ -24,6 +24,9 @@
 // #include "object.h"
 
 
+#include "velocitySpace.h"
+
+
 //-------TEST----------
 // #include "geom_chain_validation.h"
 #include "adjoint_validation.h"
@@ -198,11 +201,19 @@ int main(int argc, char** argv) {
         localMesh.faces[faceI].neigh = localMesh.nCells + bf; // boundary pseudo cell
     }
 
+    VelocitySpace vel;
+    if (!vel.build(scfg)) {
+            if (rank == 0) {
+                printf("Error: failed to build velocity space\\n");
+            }
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+
     // 几何导数链验证
     // runGeometryChainValidation(localMesh,1.0e-7);
 
     // 检查边界节点移动后有限差分导数和伴随导数的一致性
-    validateOneBoundaryPoint(localMesh, scfg, MPI_COMM_WORLD);
+    validateOneBoundaryPoint(localMesh,vel,scfg, MPI_COMM_WORLD);
 
     // double eps = 1e-3;
     // verifySensitivityByFiniteDifference(globalMesh,localMesh,scfg,MPI_COMM_WORLD,eps);
