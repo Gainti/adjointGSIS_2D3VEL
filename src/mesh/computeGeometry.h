@@ -6,6 +6,7 @@
 void buildCellFaces(Mesh& mesh);
 void buildCellPoint(Mesh& mesh);
 void adjustCell2node(Mesh& mesh);
+void addBoundaryPseudoCells(Mesh& mesh);
 
 void haloExchangeCellGeom(Mesh& local, MPI_Comm comm);
 

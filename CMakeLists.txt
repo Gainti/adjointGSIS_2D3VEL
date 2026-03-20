@@ -45,6 +45,7 @@ add_executable(solver
     src/sensitivity/boundary_sensitivity.cpp
     # src/test/geom_chain_validation.cpp
     src/test/adjoint_validation.cpp
+    src/test/lsq_validation.cpp
 )
 
 target_include_directories(solver PUBLIC 

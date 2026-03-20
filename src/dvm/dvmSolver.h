@@ -68,7 +68,7 @@ public:
     void lusgsIter();
     void cellIter(int cellI);
     void sweepCells(const std::vector<int>& cellList, bool forward);
-
+    void grad(int cellI,int vi, double& gradx, double& grady);
 
     void reportProfile() const {
         profiler.report(comm, rank, "[DVM profile summary]");

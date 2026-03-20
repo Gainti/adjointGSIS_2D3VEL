@@ -31,6 +31,7 @@
 //-------TEST----------
 // #include "geom_chain_validation.h"
 #include "adjoint_validation.h"
+#include "lsq_validation.h"
 
 static void usage() {
     printf("Usage:\n");
@@ -195,12 +196,6 @@ int main(int argc, char** argv) {
     // deformMeshSpring(globalMesh,localMesh, bdisp, MPI_COMM_WORLD, 500, 1e-10, 1.8);
     // MPI_Barrier(MPI_COMM_WORLD);
 
- 
-    // 修改关于邻居的定义(边界面的邻居不是-1,而是边界面对应的单元id)
-    for (int bf = 0; bf < localMesh.nBoundaryFaces; ++bf) {
-        int faceI = localMesh.nInternalFaces + bf;
-        localMesh.faces[faceI].neigh = localMesh.nCells + bf; // boundary pseudo cell
-    }
 
     VelocitySpace vel;
     if (!vel.build(scfg)) {
@@ -210,15 +205,23 @@ int main(int argc, char** argv) {
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
+    // 验证最小二乘法计算梯度的正确性
+    // validateLeastSquaresLinearField(localMesh, MPI_COMM_WORLD, 1, -2, 0.5);
+
     // 几何导数链验证
     // runGeometryChainValidation(localMesh,1.0e-7);
 
     // 检查边界节点移动后有限差分导数和伴随导数的一致性
-    validateOneBoundaryPoint(localMesh,vel,scfg, MPI_COMM_WORLD);  
+    // double eps_scale = 1e-4;
+    // validateOneBoundaryPoint(localMesh,vel,scfg, 29, 1, eps_scale, MPI_COMM_WORLD);
+    // validateOneBoundaryPoint(localMesh,vel,scfg, 3, 1, eps_scale, MPI_COMM_WORLD);    
 
 
     // 检查边界缩放后有限差分导数和伴随导数的一致性
     // validateYscaleboundary(globalMesh,localMesh,vel,scfg, MPI_COMM_WORLD);
+
+
+    validatePressureFarFieldBoundaryYMode(localMesh,vel,scfg,MPI_COMM_WORLD);
 
     // double eps = 1e-3;
     // verifySensitivityByFiniteDifference(globalMesh,localMesh,scfg,MPI_COMM_WORLD,eps);
@@ -242,7 +245,10 @@ int main(int argc, char** argv) {
     // }
     // t1 = MPI_Wtime();
     // report_stage_time("dvm", t1 - t0, MPI_COMM_WORLD);
-    // // dvm.reportProfile();
+    // dvm.reportProfile();
+
+    // message("[output macro]",rank);
+    // write_tecplot(utils::join_path(output_dir, "macro"),globalMesh,localMesh,dvm.macro,Nmacro,MPI_COMM_WORLD);
 
     // message("[Adjoint solve]",rank);
     // adjointDVM adj(dvm);
@@ -258,10 +264,6 @@ int main(int argc, char** argv) {
     // }
     // t1 = MPI_Wtime();
     // report_stage_time("adjoint", t1 - t0, MPI_COMM_WORLD);
-
-    // message("[output macro]",rank);
-    // write_tecplot(utils::join_path(output_dir, "macro"),globalMesh,localMesh,dvm.macro,Nmacro,MPI_COMM_WORLD);
-
     // message("[output adjoint macro]",rank);
     // write_tecplot(utils::join_path(output_dir, "amacro"),globalMesh,localMesh,adj.amacro,Namacro,MPI_COMM_WORLD);
 

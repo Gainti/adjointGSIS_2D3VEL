@@ -27,6 +27,12 @@ void haloExchangeCellGeom(Mesh& local, MPI_Comm comm)
     }
 }
 
+void addBoundaryPseudoCells(Mesh& mesh) {
+    for (int bf = 0; bf < mesh.nBoundaryFaces; ++bf) {
+        int faceI = mesh.nInternalFaces + bf;
+        mesh.faces[faceI].neigh = mesh.nCells + bf; // boundary pseudo cell
+    }
+}
 
 void computeGeometry(Mesh& mesh,MPI_Comm comm){
     // 计算几何量（单元中心、面中心、面积矢量、面积大小、单元中心到面中心的矢量）
@@ -44,48 +50,59 @@ void computeGeometry(Mesh& mesh,MPI_Comm comm){
     for(size_t faceI=0;faceI<mesh.nFaces;faceI++){
         mesh.faces[faceI].Tf= mesh.faces[faceI].Sf - mesh.faces[faceI].Ef;
     }
-    // 单元中心添加边界面中心的信息
 
     // 最小二乘法计算梯度时需要的逆矩阵
-    // for(size_t cellI=0;cellI<nCells();cellI++){
-    //     double A00=0, A01=0, A11=0;
-    //     const auto& faces= cells_[cellI];
-    //     for(auto faceI:faces){
-    //         vector dC;
-    //         size_t owner=owner_[faceI];
-    //         size_t neighbour=neighbour_[faceI];
-    //         if(cellI==owner){
-    //             dC= C_[neighbour]-C_[owner];
-    //         }else{
-    //             dC= C_[owner]-C_[neighbour];
-    //         }
-    //         A00 += dC.x * dC.x;
-    //         A01 += dC.y * dC.x;
-    //         A11 += dC.y * dC.y;
-    //     }
-    //     double det =A00*A11-A01*A01;
-    //     if(std::abs(det)>1e-20){
-    //         invA_.push_back({A11/det, -A01/det, A00/det});
-    //     }else{
-    //         invA_.push_back({0.0,0.0,0.0});
-    //         std::cout<<"Warning: Singular matrix encountered when computing gradient at cell "<<cellI<<std::endl;
-    //     }
-    // }
+    for(size_t cellI=0;cellI<mesh.nCells;cellI++){
+        double A00=0, A01=0, A11=0;
+        auto& cell = mesh.cells[cellI];
+        for(auto faceI:cell.cell2face){
+            vector dC;
+            size_t owner=mesh.faces[faceI].owner;
+            size_t neigh=mesh.faces[faceI].neigh;
+            if(cellI==owner){
+                if(neigh<mesh.nCells){ // 内部面
+                    dC= mesh.cells[neigh].C-mesh.cells[owner].C;
+                }else{ // 边界面，邻居是伪单元，使用边界面中心代替邻居单元中心
+                    dC= mesh.faces[faceI].Cf - mesh.cells[owner].C;
+                }
+            }else{
+                dC= mesh.cells[owner].C-mesh.cells[neigh].C;
+            }
+            A00 += dC.x * dC.x;
+            A01 += dC.y * dC.x;
+            A11 += dC.y * dC.y;
+        }
+        double det =A00*A11-A01*A01;
+        if(std::abs(det)>1e-20){
+            cell.invA[0] = A11/det;
+            cell.invA[1] = -A01/det;
+            cell.invA[2] = A00/det;
+        }else{
+            cell.invA[0] = 0.0;
+            cell.invA[1] = 0.0;
+            cell.invA[2] = 0.0;
+            printf("Warning: Singular matrix encountered when computing gradient at cell %zu\n", cellI);
+        }
+    }
     // 计算单元到单元的距离
-    // for(size_t cellI=0;cellI<nCells();cellI++){
-    //     const auto& faces= cells_[cellI];
-    //     for(auto faceI:faces){
-    //         size_t owner=owner_[faceI];
-    //         size_t neighbour=neighbour_[faceI];
-    //         vector dC;
-    //         if(cellI==owner){
-    //             dC= C_[neighbour]-C_[owner];
-    //         }else{
-    //             dC= C_[owner]-C_[neighbour];
-    //         }
-    //         dxyz_[cellI].push_back(std::array<double,2>{dC.x,dC.y});
-    //     }
-    // }
+    for(size_t cellI=0;cellI<mesh.nCells;cellI++){
+        auto& cell = mesh.cells[cellI];
+        for(auto faceI:cell.cell2face){
+            size_t owner=mesh.faces[faceI].owner;
+            size_t neigh=mesh.faces[faceI].neigh;
+            vector dC;
+            if(cellI==owner){
+                if(neigh<mesh.nCells){
+                    dC= mesh.cells[neigh].C-mesh.cells[owner].C;
+                }else{
+                    dC= mesh.faces[faceI].Cf - mesh.cells[owner].C;
+                }
+            }else{
+                dC= mesh.cells[owner].C-mesh.cells[neigh].C;
+            }
+            cell.dxyz.push_back(std::array<double,2>{dC.x,dC.y});
+        }
+    }
 }
 void buildCellFaces(Mesh& mesh)
 {

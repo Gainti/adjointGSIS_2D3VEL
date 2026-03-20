@@ -350,6 +350,7 @@ bool partition_and_distribute(
     // compute geometry
     buildCellFaces(local);// cell2face
     buildCellPoint(local);// cell2node
+    addBoundaryPseudoCells(local);// adjust neigh for boundary faces
     computeGeometry(local,comm);
     buildInteriorBoundaryCells(local);
 

@@ -34,12 +34,15 @@ public:
         return primal.index_vdf(celli, vi);
     }
     
+    void massConservation();
     void updateAdjMacro();
     void adjointBoundarySet();
     void getAdjRhs();
     void cellIterAdj(int cellI);
     void lusgsIterAdj();
     void step(int iter);
+
+    void grad(int cellI,int vi, double& gradx, double& grady);
 
 private:
     void diffuseWall(int facei);

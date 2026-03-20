@@ -130,12 +130,13 @@ std::array<double,2> DiffuseBoundaryModel::dhb_dn(
 // =========================
 void BoundarySensitivityAssembler::computeOwnerCellGradient(
     dvmSolver& primal,
-    int owner,
+    int cellI,
     std::vector<double>& gradHx,
     std::vector<double>& gradHy)
 {
     const auto& mesh  = primal.mesh;
-    const auto& cell  = mesh.cells[owner];
+    const auto& cell  = mesh.cells[cellI];
+    const auto& cells = mesh.cells;
     const auto& faces = mesh.faces;
 
     const auto& h =primal.vdf;
@@ -148,24 +149,31 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
         double gx = 0.0;
         double gy = 0.0;
 
-        for (int facej : cell.cell2face) {
-            const auto& fj = faces[facej];
-            int ownerj = fj.owner;
-            int neighj = fj.neigh;
+        for (int faceI : cell.cell2face) {
+            const auto& fj = faces[faceI];
+            int owner = fj.owner;
+            int neigh = fj.neigh;
 
             vector Sf = fj.Sf;
             double vn = Sf.x * primal.Vx[vi] + Sf.y * primal.Vy[vi];
+
+            vector xof = faces[faceI].Cf -cells[owner].C;
+            vector xnf = faces[faceI].Cf -cells[neigh].C;
+
             double hf = 0.0;
+            double dhdx, dhdy;
             if (vn > 0.0) {
-                hf = h[ownerj*Nv + vi];
+                primal.grad(owner, vi, dhdx, dhdy);
+                hf = h[owner*Nv + vi] + dhdx*xof.x + dhdy*xof.y;
             }else{
-                hf = h[neighj*Nv + vi];
+                primal.grad(neigh, vi, dhdx, dhdy);
+                hf = h[neigh*Nv + vi] + dhdx*xnf.x + dhdy*xnf.y;
             }
 
-            if (owner == ownerj) {
+            if (cellI == owner) {
                 gx += hf * fj.Sf.x;
                 gy += hf * fj.Sf.y;
-            } else if (owner == neighj) {
+            } else if (cellI == neigh) {
                 gx -= hf * fj.Sf.x;
                 gy -= hf * fj.Sf.y;
             }

@@ -159,8 +159,9 @@ void dvmSolver::updateMacro() {
 
 void dvmSolver::getRhs() {
     ScopedTimer timer(profiler, DvmTimerID::GetRhs);
-
     const auto& cells = mesh.cells;
+    const auto& faces = mesh.faces;
+
     for(size_t cellI=0;cellI<mesh.nOwned;cellI++) {
         double V=cells[cellI].V;
         scalar rho=macro[cellI*Nmacro+0];
@@ -177,6 +178,36 @@ void dvmSolver::getRhs() {
             scalar qdotv = qx*Vx[vi]+qy*Vy[vi];
             scalar coll = rho + 2.0*udotv + (c2[vi]-1.5)*tau + (c2[vi]-2.5)*4.0/15.0*qdotv;
             rhs[cell_vdf+vi]   = cfg.delta * V * coll;
+        }
+    }
+
+    // 二阶迎风
+    for(int faceI=0;faceI<mesh.nInternalFaces;faceI++) {
+        int owner=faces[faceI].owner;
+        int neigh=faces[faceI].neigh;
+        const vector& Sf=faces[faceI].Sf;
+        double magSf=Sf.mag();
+        vector nf= Sf/magSf;
+
+        vector xof = faces[faceI].Cf -cells[owner].C;
+        vector xnf = faces[faceI].Cf -cells[neigh].C;
+
+        scalar dhdx,dhdy;
+
+        for(size_t vi=0;vi<Nv;vi++) {
+            double phi = Sf.x*Vx[vi] + Sf.y*Vy[vi];
+            if (phi>0.0) {
+                // 计算梯度
+                grad(owner,vi,dhdx,dhdy);
+                scalar temp = phi*(dhdx*xof.x + dhdy*xof.y);
+                rhs[owner*Nv+vi]-= temp;
+                rhs[neigh*Nv+vi]+= temp;
+            }else{
+                grad(neigh,vi,dhdx,dhdy);
+                scalar temp = phi*(dhdx*xnf.x + dhdy*xnf.y);
+                rhs[owner*Nv+vi]-= temp;
+                rhs[neigh*Nv+vi]+= temp;
+            }
         }
     }
 }
@@ -399,7 +430,7 @@ void dvmSolver::lusgsIter()
 {
     ScopedTimer timer_total(profiler, DvmTimerID::LusgsTotal);
 
-    for (size_t iter = 0; iter < 1; ++iter) {
+    for (size_t iter = 0; iter < 2; ++iter) {
 
         // ---------- forward sweep ----------
         {
@@ -447,21 +478,21 @@ void dvmSolver::lusgsIter()
     }
 }
 
-// void dvmSolver::massConservation() {
-//     // 需要对密度进行守恒性修正
-//     double V_sum = 0.0;
-//     scalar rho_avr = Zero;
-//     for (int cellI = 0; cellI < mesh.nCells; ++cellI) {
-//         double V = mesh.cells[cellI].V;
-//         scalar rho = macro[cellI*Nmacro+0];
-//         rho_avr += rho * V;
-//         V_sum   += V;
-//     }
-//     rho_avr/=V_sum;
-//     for(int cellI=0;cellI<mesh.nCells;cellI++){
-//         macro[cellI*Nmacro+0] -= rho_avr;
-//     }
-// }
+void dvmSolver::massConservation() {
+    // 需要对密度进行守恒性修正
+    double V_sum = 0.0;
+    scalar rho_avr = Zero;
+    for (int cellI = 0; cellI < mesh.nCells; ++cellI) {
+        double V = mesh.cells[cellI].V;
+        scalar rho = macro[cellI*Nmacro+0];
+        rho_avr += rho * V;
+        V_sum   += V;
+    }
+    rho_avr/=V_sum;
+    for(int cellI=0;cellI<mesh.nCells;cellI++){
+        macro[cellI*Nmacro+0] -= rho_avr;
+    }
+}
 void dvmSolver::step(int iter) {
     ScopedTimer timer(profiler, DvmTimerID::StepTotal);
     
@@ -474,10 +505,44 @@ void dvmSolver::step(int iter) {
     // 求宏观量并全局归约残差
     updateMacro();
     // 密度守恒性修正
-    // massConservation();
+    massConservation();
     if(rank==0 && (iter%cfg.print_interval==0 || iter ==1)){
         printf("iter %d\t res_ux: %3e\t res_uy: %3e\t res_rho: %3e \t res_tau: %3e\n\n",
             iter, res_ux, res_uy, res_rho, res_tau);
     }
 }
 
+void dvmSolver::grad(int cellI,int vi, double& gradx, double& grady){
+    const auto& cell  = mesh.cells[cellI];
+    const auto& faces = mesh.faces;
+
+    const double V = cell.V;
+    if (V <= 1e-30) {
+        gradx = 0.0;
+        grady = 0.0;
+        return;
+    }
+    const auto& face_ids = cell.cell2face;
+    const int nf = static_cast<int>(face_ids.size());
+
+    double dh = 0.0;
+    double b[2] = {0.0,0.0};
+    for (int k = 0; k < nf; ++k) {
+        const int faceI = face_ids[k];
+        const Face& f = faces[faceI];
+
+        int owner = f.owner;
+        int neigh = f.neigh;
+
+        if(cellI==owner){
+            dh = vdf[neigh*Nv + vi] - vdf[owner*Nv + vi];
+        }else{
+            dh = vdf[owner*Nv + vi] - vdf[neigh*Nv + vi];
+        }
+        b[0] += dh * cell.dxyz[k][0];
+        b[1] += dh * cell.dxyz[k][1];
+    }
+    const auto& invA = cell.invA;
+    gradx = invA[0]*b[0] + invA[1]*b[1];
+    grady = invA[1]*b[0] + invA[2]*b[1];
+}

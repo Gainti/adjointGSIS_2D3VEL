@@ -140,6 +140,8 @@ void adjointDVM::adjointBoundarySet() {
 }
 void adjointDVM::getAdjRhs() {
     std::fill(arhs.begin(), arhs.end(), Zero);
+    const auto& cells = mesh.cells;
+    const auto& faces = mesh.faces;
 
     for(size_t cellI=0; cellI<mesh.nOwned; ++cellI) {
         double V = mesh.cells[cellI].V;
@@ -159,6 +161,36 @@ void adjointDVM::getAdjRhs() {
 
             scalar coll = arho + udotv + (2.0/3.0*c2[vi]-1.0)*atau + (c2[vi]-2.5)*qdotv;
             arhs[idx]   = cfg.delta * V * coll;
+        }
+    }
+
+    // 二阶迎风
+    for(int faceI=0;faceI<mesh.nInternalFaces;faceI++) {
+        int owner=faces[faceI].owner;
+        int neigh=faces[faceI].neigh;
+        const vector& Sf=faces[faceI].Sf;
+        double magSf=Sf.mag();
+        vector nf= Sf/magSf;
+
+        vector xof = faces[faceI].Cf -cells[owner].C;
+        vector xnf = faces[faceI].Cf -cells[neigh].C;
+
+        scalar dhdx,dhdy;
+
+        for(size_t vi=0;vi<Nv;vi++) {
+            double phi = -(Sf.x*Vx[vi] + Sf.y*Vy[vi]);
+            if (phi>0.0) {
+                // 计算梯度
+                grad(owner,vi,dhdx,dhdy);
+                scalar temp = phi*(dhdx*xof.x + dhdy*xof.y);
+                arhs[owner*Nv+vi]-= temp;
+                arhs[neigh*Nv+vi]+= temp;
+            }else{
+                grad(neigh,vi,dhdx,dhdy);
+                scalar temp = phi*(dhdx*xnf.x + dhdy*xnf.y);
+                arhs[owner*Nv+vi]-= temp;
+                arhs[neigh*Nv+vi]+= temp;
+            }
         }
     }
 }
@@ -207,7 +239,7 @@ void adjointDVM::cellIterAdj(int cellI) {
     }
 }
 void adjointDVM::lusgsIterAdj() {
-    for(size_t iter=0;iter<5;iter++){
+    for(size_t iter=0;iter<2;iter++){
         for(int cellI=0;cellI<mesh.nOwned;cellI++) {
             cellIterAdj(cellI);
         }
@@ -216,6 +248,23 @@ void adjointDVM::lusgsIterAdj() {
         }
     }
 }
+
+void adjointDVM::massConservation() {
+    // 需要对密度进行守恒性修正
+    double V_sum = 0.0;
+    scalar rho_avr = Zero;
+    for (int cellI = 0; cellI < mesh.nCells; ++cellI) {
+        double V = mesh.cells[cellI].V;
+        scalar rho = amacro[cellI*Namacro+0];
+        rho_avr += rho * V;
+        V_sum   += V;
+    }
+    rho_avr/=V_sum;
+    for(int cellI=0;cellI<mesh.nCells;cellI++){
+        amacro[cellI*Namacro+0] -= rho_avr;
+    }
+}
+
 void adjointDVM::step(int iter){
     // rhs 只组装 owned
     getAdjRhs();
@@ -226,9 +275,44 @@ void adjointDVM::step(int iter){
     // 求宏观量并全局归约残差
     updateAdjMacro();
     // 密度守恒性修正
-    // massConservation();
+    massConservation();
     if(rank==0 && (iter%cfg.print_interval==0 || iter ==1)){
         printf("iter %d\t res_aux: %3e\t res_auy: %3e\t res_arho: %3e \t res_atau: %3e\n\n",
             iter, res_aux, res_auy, res_arho, res_atau);
     }
+}
+
+void adjointDVM::grad(int cellI,int vi, double& gradx, double& grady){
+    const auto& cell  = mesh.cells[cellI];
+    const auto& faces = mesh.faces;
+
+    const double V = cell.V;
+    if (V <= 1e-30) {
+        gradx = 0.0;
+        grady = 0.0;
+        return;
+    }
+    const auto& face_ids = cell.cell2face;
+    const int nf = static_cast<int>(face_ids.size());
+
+    double dh = 0.0;
+    double b[2] = {0.0,0.0};
+    for (int k = 0; k < nf; ++k) {
+        const int faceI = face_ids[k];
+        const Face& f = faces[faceI];
+
+        int owner = f.owner;
+        int neigh = f.neigh;
+
+        if(cellI==owner){
+            dh = avdf[neigh*Nv + vi] - avdf[owner*Nv + vi];
+        }else{
+            dh = avdf[owner*Nv + vi] - avdf[neigh*Nv + vi];
+        }
+        b[0] += dh * cell.dxyz[k][0];
+        b[1] += dh * cell.dxyz[k][1];
+    }
+    const auto& invA = cell.invA;
+    gradx = invA[0]*b[0] + invA[1]*b[1];
+    grady = invA[1]*b[0] + invA[2]*b[1];
 }
