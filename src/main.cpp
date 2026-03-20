@@ -72,10 +72,6 @@ void printConfig(const SolverConfig &cfg,const int rank){
 
     printf("===================================\n\n");
 }
-// int main(int argc, char** argv) {
-//     testMesh(argc,argv);
-//     return 1;
-// }
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     int rank = 0;
