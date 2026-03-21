@@ -5,6 +5,9 @@
 #include "utils.h"
 #include "output.h"
 
+#include "adjoint_validation.h"
+
+
 bool initializeApp(int argc, char** argv, AppContext& ctx) {
     MPI_Comm_rank(ctx.comm, &ctx.rank);
     MPI_Comm_size(ctx.comm, &ctx.size);
@@ -35,45 +38,6 @@ bool initializeApp(int argc, char** argv, AppContext& ctx) {
         return false;
     }
 
-    return true;
-}
-
-bool runValidationTasks(AppContext& ctx) {
-
-    // message("mesh deform",rank);
-    // std::vector<int> boundaryPts;
-    // collectAllBoundaryPoints(globalMesh, boundaryPts);
-    
-    // std::vector<BoundaryNodeDisplacement> bdisp;
-    // bdisp.reserve(boundaryPts.size());
-    
-    // double scale = 0.8;
-    // for (int pid : boundaryPts)
-    // {
-    //     const auto& point = globalMesh.points[pid];
-    //     vector d(0.0, (scale-1.0)*point.y, 0.0);
-    //     bdisp.push_back({pid, d});
-    // }
-    
-    // deformMeshSpring(globalMesh,localMesh, bdisp, MPI_COMM_WORLD, 500, 1e-10, 1.8);
-    // MPI_Barrier(MPI_COMM_WORLD);
-
-    // 验证最小二乘法计算梯度的正确性
-    // validateLeastSquaresLinearField(localMesh, MPI_COMM_WORLD, 1, -2, 0.5);
-
-    // 几何导数链验证
-    // runGeometryChainValidation(localMesh,1.0e-7);
-
-    // 检查边界节点移动后有限差分导数和伴随导数的一致性
-    // double eps_scale = 1e-4;
-    // validateOneBoundaryPoint(localMesh,vel,scfg, 29, 1, eps_scale, MPI_COMM_WORLD);
-    // validateOneBoundaryPoint(localMesh,vel,scfg, 3, 1, eps_scale, MPI_COMM_WORLD);  
-
-    // 检查边界缩放后有限差分导数和伴随导数的一致性
-    // validateYscaleboundary(globalMesh,localMesh,vel,scfg, MPI_COMM_WORLD);
-
-    // 检查剪切壁面按形函数沿y方向变化的有限差分导数和伴随导数的一致性
-    // validatePressureFarFieldBoundaryYMode(localMesh,vel,scfg,MPI_COMM_WORLD);
     return true;
 }
 bool runForwardSolve(AppContext& ctx) {
@@ -155,9 +119,52 @@ bool writeOutputs(AppContext& ctx) {
     return true;
 }
 
+bool runValidationTasks(AppContext& ctx) {
+
+    const auto& localMesh = ctx.localMesh;
+    const auto& vel = ctx.vel;
+    const auto& scfg = ctx.cfg;
+    // message("mesh deform",rank);
+    // std::vector<int> boundaryPts;
+    // collectAllBoundaryPoints(globalMesh, boundaryPts);
+    
+    // std::vector<BoundaryNodeDisplacement> bdisp;
+    // bdisp.reserve(boundaryPts.size());
+    
+    // double scale = 0.8;
+    // for (int pid : boundaryPts)
+    // {
+    //     const auto& point = globalMesh.points[pid];
+    //     vector d(0.0, (scale-1.0)*point.y, 0.0);
+    //     bdisp.push_back({pid, d});
+    // }
+    
+    // deformMeshSpring(globalMesh,localMesh, bdisp, MPI_COMM_WORLD, 500, 1e-10, 1.8);
+    // MPI_Barrier(MPI_COMM_WORLD);
+
+    // 验证最小二乘法计算梯度的正确性
+    // validateLeastSquaresLinearField(localMesh, MPI_COMM_WORLD, 1, -2, 0.5);
+
+    // 几何导数链验证
+    // runGeometryChainValidation(localMesh,1.0e-7);
+
+    // 检查边界节点移动后有限差分导数和伴随导数的一致性
+    double eps_scale = 1e-4;
+    validateOneBoundaryPoint(localMesh,vel,scfg, 29, 1, eps_scale, MPI_COMM_WORLD);
+    validateOneBoundaryPoint(localMesh,vel,scfg, 3, 1, eps_scale, MPI_COMM_WORLD);  
+
+    // 检查边界缩放后有限差分导数和伴随导数的一致性
+    // validateYscaleboundary(globalMesh,localMesh,vel,scfg, MPI_COMM_WORLD);
+
+    // 检查剪切壁面按形函数沿y方向变化的有限差分导数和伴随导数的一致性
+    // validatePressureFarFieldBoundaryYMode(localMesh,vel,scfg,MPI_COMM_WORLD);
+    return true;
+}
+
 bool runApp(AppContext& ctx) {
-    runForwardSolve(ctx);
-    runAdjointSolve(ctx);
-    writeOutputs(ctx);
+    runValidationTasks(ctx);
+    // runForwardSolve(ctx);
+    // runAdjointSolve(ctx);
+    // writeOutputs(ctx);
     return true;
 }

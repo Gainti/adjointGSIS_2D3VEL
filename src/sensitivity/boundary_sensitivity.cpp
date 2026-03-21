@@ -5,6 +5,10 @@
 #include <stdexcept>
 #include <array>
 
+
+inline int index_grad(int vi, int i, int j) {
+    return vi*Nvdf*dim + i*dim + j;
+}
 // =========================
 // geometry derivatives
 // =========================
@@ -125,14 +129,11 @@ std::array<double,2> DiffuseBoundaryModel::dhb_dn(
     return out;
 }
 
-// =========================
-// owner-cell gradient only
-// =========================
+// Guass formula to compute dhdC on boundary face(using zero gradient)
 void BoundarySensitivityAssembler::computeOwnerCellGradient(
     dvmSolver& primal,
     int cellI,
-    std::vector<double>& gradHx,
-    std::vector<double>& gradHy)
+    std::vector<scalar>& gradh)
 {
     const auto& mesh  = primal.mesh;
     const auto& cell  = mesh.cells[cellI];
@@ -146,8 +147,7 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
     if (V <= 1e-30) return;
 
     for (int vi = 0; vi < Nv; ++vi) {
-        double gx = 0.0;
-        double gy = 0.0;
+        scalar gradh_t[dim*Nvdf] = {Zero};
 
         for (int faceI : cell.cell2face) {
             const auto& fj = faces[faceI];
@@ -160,27 +160,37 @@ void BoundarySensitivityAssembler::computeOwnerCellGradient(
             vector xof = faces[faceI].Cf -cells[owner].C;
             vector xnf = faces[faceI].Cf -cells[neigh].C;
 
-            double hf = 0.0;
-            double dhdx, dhdy;
+            scalar hf[Nvdf] = {Zero};
+            scalar dh[dim*Nvdf] = {Zero};
+            int idx_owner = primal.index_vdf(owner, vi);
+            int idx_neigh = primal.index_vdf(neigh, vi);
             if (vn > 0.0) {
-                primal.grad(owner, vi, dhdx, dhdy);
-                hf = h[owner*Nv + vi] + dhdx*xof.x + dhdy*xof.y;
+                primal.grad(owner, vi, dh, Nvdf);
+                hf[0] = h[idx_owner+0] + dh[0]*xof.x + dh[1]*xof.y;
+                hf[1] = h[idx_owner+1] + dh[2]*xof.x + dh[3]*xof.y;
             }else{
-                primal.grad(neigh, vi, dhdx, dhdy);
-                hf = h[neigh*Nv + vi] + dhdx*xnf.x + dhdy*xnf.y;
+                primal.grad(neigh, vi, dh, Nvdf);
+                hf[0] = h[idx_neigh+0] + dh[0]*xnf.x + dh[1]*xnf.y;
+                hf[1] = h[idx_neigh+1] + dh[2]*xnf.x + dh[3]*xnf.y;
             }
 
             if (cellI == owner) {
-                gx += hf * fj.Sf.x;
-                gy += hf * fj.Sf.y;
+                for(int i=0;i<Nvdf;i++){
+                    gradh_t[i*dim+0] += hf[i] * Sf.x;
+                    gradh_t[i*dim+1] += hf[i] * Sf.y;
+                }
             } else if (cellI == neigh) {
-                gx -= hf * fj.Sf.x;
-                gy -= hf * fj.Sf.y;
+                for(int i=0;i<Nvdf;i++){
+                    gradh_t[i*dim+0] -= hf[i] * Sf.x;
+                    gradh_t[i*dim+1] -= hf[i] * Sf.y;
+                }
             }
         }
-
-        gradHx[vi] = gx / V;
-        gradHy[vi] = gy / V;
+        for(int i=0;i<Nvdf;i++){
+            int index = index_grad(vi, i, 0);
+            gradh[index] = gradh_t[i*dim+0] / V;
+            gradh[index+1] = gradh_t[i*dim+1] / V;
+        }
     }
 }
 
@@ -198,21 +208,22 @@ void BoundarySensitivityAssembler::accumulate_dJdA_dJdn(
     double A = f.Sf.mag();
     vector nf = f.Sf / A;
 
-    double dJdA = 0.0;
-    double dJdn[2] = {0.0, 0.0};
+    scalar dJdA = 0.0;
+    scalar dJdn[dim] = {Zero};
 
     if(f.bc_type == BCType::pressure_far_field) {
         for (int vi = 0; vi < primal.Nv; ++vi) {
-            double cn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
-    
-            double h = primal.vdf[neigh*primal.Nv + vi];
+            double vn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
+            
+            int idx_neigh = primal.index_vdf(neigh, vi);
+            scalar h1 = primal.vdf[idx_neigh+0];
             double m = objectiveWeight(primal.Vx[vi], primal.Vy[vi]);
 
             double w = primal.feq[vi] * primal.weight[vi];
     
-            dJdA += cn * m * h * w;
-            dJdn[0] += A * m * h * primal.Vx[vi] * w;
-            dJdn[1] += A * m * h * primal.Vy[vi] * w;
+            dJdA += vn * m * h1 * w;
+            dJdn[0] += A * m * h1 * primal.Vx[vi] * w;
+            dJdn[1] += A * m * h1 * primal.Vy[vi] * w;
         }
     }
 
@@ -227,8 +238,7 @@ void BoundarySensitivityAssembler::accumulate_dJdA_dJdn(
 void BoundarySensitivityAssembler::accumulate_dJdC(
     dvmSolver& primal,
     int facei,
-    const std::vector<double>& gradHx,
-    const std::vector<double>& gradHy,
+    const std::vector<scalar>& gradh,
     FaceGeomGrad& g)
 {
     const auto& mesh = primal.mesh;
@@ -244,13 +254,14 @@ void BoundarySensitivityAssembler::accumulate_dJdC(
 
     if(f.bc_type == BCType::pressure_far_field){
         for (int vi = 0; vi < primal.Nv; ++vi) {
-            double cn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
+            double vn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
             double m  = objectiveWeight(primal.Vx[vi], primal.Vy[vi]);
     
-            double coeff = A*cn*m*primal.feq[vi] * primal.weight[vi];
+            double coeff = A*vn*m*primal.feq[vi] * primal.weight[vi];
     
-            dJdC[0] += coeff * gradHx[vi];
-            dJdC[1] += coeff * gradHy[vi];
+            int idx_grad = index_grad(vi, 0, 0);
+            dJdC[0] += coeff * gradh[idx_grad+0];
+            dJdC[1] += coeff * gradh[idx_grad+1];
          }
     }
 
@@ -278,8 +289,9 @@ void BoundarySensitivityAssembler::accumulate_dBwdn(
     for (int vi = 0; vi < primal.Nv; ++vi) {
         double cn = nf.x * primal.Vx[vi] + nf.y * primal.Vy[vi];
         if (cn > 0.0) {
-            double hp = primal.vdf[neigh*primal.Nv + vi];
-            double coeff = 2.0 / PI * primal.exp_c2[vi] * hp * primal.weight[vi];
+            int idx_neigh = primal.index_vdf(neigh, vi);
+            double h1 = primal.vdf[idx_neigh+0];
+            double coeff = 2.0*sqrtPI* primal.feq[vi] * h1 * primal.weight[vi];
 
             dKdn[0] += coeff * primal.Vx[vi];
             dKdn[1] += coeff * primal.Vy[vi];
@@ -289,31 +301,35 @@ void BoundarySensitivityAssembler::accumulate_dBwdn(
     double dBwdn[2] = {0.0, 0.0};
     if(f.bc_type == BCType::pressure_far_field) {
         for (int vi = 0; vi < primal.Nv; ++vi) {
-            double cn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
-            if (cn >= 0.0) continue;
-    
-            double phi = adjoint.avdf[neigh*primal.Nv + vi];
+            double vn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
+            if (vn >= 0.0) continue;
+            
+            int idx_neigh = primal.index_vdf(neigh, vi);
+            scalar phi1 = adjoint.avdf[idx_neigh+0];
+            scalar phi2 = adjoint.avdf[idx_neigh+1];
             double m = objectiveWeight(primal.Vx[vi], primal.Vy[vi]);
-            double lambda = -cn * (phi + m);
+            double phiw = -vn * (phi1 + phi2 +  m);
     
             double w = primal.feq[vi] * primal.weight[vi];
             auto dhbdn = DiffuseBoundaryModel::dhb_dn(primal, facei, vi);
-            dBwdn[0] += lambda * (-dKdn[0] - dhbdn[0]) * w;
-            dBwdn[1] += lambda * (-dKdn[1] - dhbdn[1]) * w;
+            dBwdn[0] -= phiw * (dKdn[0] + dhbdn[0]) * w;
+            dBwdn[1] -= phiw * (dKdn[1] + dhbdn[1]) * w;
     
         }
     }else if(f.bc_type == BCType::wall) {
         for (int vi = 0; vi < primal.Nv; ++vi) {
-            double cn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
-            if (cn >= 0.0) continue;
+            double vn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
+            if (vn >= 0.0) continue;
     
-            double phi_minus = adjoint.avdf[neigh*primal.Nv + vi];
-            double lambda = -cn * phi_minus;
+            int idx_neigh = primal.index_vdf(neigh, vi);
+            scalar phi1 = adjoint.avdf[idx_neigh+0];
+            scalar phi2 = adjoint.avdf[idx_neigh+1];
+            double phiw = -vn * (phi1 + phi2);
     
             double w = primal.feq[vi] * primal.weight[vi];
             auto dhbdn = DiffuseBoundaryModel::dhb_dn(primal, facei, vi);
-            dBwdn[0] += lambda * (-dKdn[0] - dhbdn[0]) * w;
-            dBwdn[1] += lambda * (-dKdn[1] - dhbdn[1]) * w;
+            dBwdn[0] -= phiw * (dKdn[0] + dhbdn[0]) * w;
+            dBwdn[1] -= phiw * (dKdn[1] + dhbdn[1]) * w;
     
         }
     }
@@ -328,8 +344,7 @@ void BoundarySensitivityAssembler::accumulate_dBwdC(
     dvmSolver& primal,
     const adjointDVM& adjoint,
     int facei,
-    const std::vector<double>& gradHx,
-    const std::vector<double>& gradHy,
+    const std::vector<double>& gradh,
     FaceGeomGrad& g)
 {
     const auto& f = primal.mesh.faces[facei];
@@ -341,43 +356,59 @@ void BoundarySensitivityAssembler::accumulate_dBwdC(
     // compute dK/dC
     double dKdC[2] = {0.0, 0.0};
     for (int vi = 0; vi < primal.Nv; ++vi) {
-        double cn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
-        if (cn <= 0.0) continue;
+        double vn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
+        if (vn <= 0.0) continue;
 
-        double coeff = 2.0 / PI * cn * primal.exp_c2[vi] * primal.weight[vi];
+        double coeff = 2.0 * sqrtPI* vn * primal.feq[vi] * primal.weight[vi];
 
-        dKdC[0] += coeff * gradHx[vi];
-        dKdC[1] += coeff * gradHy[vi];
+        // dh1dx, dh1dy
+        int idx_grad = index_grad(vi, 0, 0);
+        dKdC[0] += coeff * gradh[idx_grad+0];
+        dKdC[1] += coeff * gradh[idx_grad+1];
     }
 
     // dBw/dC
     double dBwdC[2] = {0.0, 0.0};
     if(f.bc_type == BCType::pressure_far_field) {
         for (int vi = 0; vi < primal.Nv; ++vi) {
-            double cn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
-            if (cn >= 0.0) continue;
-    
-            double phi = adjoint.avdf[neigh*primal.Nv + vi];
-            double m = objectiveWeight(primal.Vx[vi], primal.Vy[vi]);
-            double lambda = -cn * (phi + m);
-    
+            double vn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
             double w = primal.feq[vi] * primal.weight[vi];
-    
-            dBwdC[0] += lambda * (gradHx[vi] - dKdC[0]) * w;
-            dBwdC[1] += lambda * (gradHy[vi] - dKdC[1]) * w;
+            if (vn >= 0.0) continue;
+            
+            int idx_neigh = primal.index_vdf(neigh, vi);
+            scalar phi1 = adjoint.avdf[idx_neigh+0];
+            scalar phi2 = adjoint.avdf[idx_neigh+1];
+            double m = objectiveWeight(primal.Vx[vi], primal.Vy[vi]);
+            scalar phiw1 = -vn * (phi1 + m);
+            scalar phiw2 = -vn * phi2;
+
+            // phiw1*dh1 + phiw2*dh2 - (phiw1+phiw2)*dKdC
+            int idx_grad = index_grad(vi, 0, 0);
+            dBwdC[0] += w*(phiw1*gradh[idx_grad+0]+phiw2*gradh[idx_grad+2] 
+                - (phiw1 + phiw2) * dKdC[0]);
+            dBwdC[1] += w*(phiw1*gradh[idx_grad+1]+phiw2*gradh[idx_grad+3] 
+                - (phiw1 + phiw2) * dKdC[1]);    
         }
     }else if(f.bc_type == BCType::wall) {
         for (int vi = 0; vi < primal.Nv; ++vi) {
-            double cn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
-            if (cn >= 0.0) continue;
-    
-            double phi = adjoint.avdf[neigh*primal.Nv + vi];
-            double lambda = -cn * phi;
-    
+            double vn = nf.x*primal.Vx[vi] + nf.y*primal.Vy[vi];
             double w = primal.feq[vi] * primal.weight[vi];
-    
-            dBwdC[0] += lambda * (gradHx[vi] - dKdC[0]) * w;
-            dBwdC[1] += lambda * (gradHy[vi] - dKdC[1]) * w;
+            if (vn >= 0.0) continue;
+
+            int idx_neigh = primal.index_vdf(neigh, vi);
+            scalar phi1 = adjoint.avdf[idx_neigh+0];
+            scalar phi2 = adjoint.avdf[idx_neigh+1];
+            double m = 0.0;
+            scalar phiw1 = -vn * (phi1 + m);
+            scalar phiw2 = -vn * phi2;
+
+
+            // phiw1*dh1 + phiw2*dh2 - (phiw1+phiw2)*dKdC
+            int idx_grad = index_grad(vi, 0, 0);
+            dBwdC[0] += w*(phiw1*gradh[idx_grad+0]+phiw2*gradh[idx_grad+2] 
+                - (phiw1 + phiw2) * dKdC[0]);
+            dBwdC[1] += w*(phiw1*gradh[idx_grad+1]+phiw2*gradh[idx_grad+3] 
+                - (phiw1 + phiw2) * dKdC[1]);    
         }
     }
     g.dBwdC[0] = A * dBwdC[0];
@@ -395,11 +426,8 @@ void BoundarySensitivityAssembler::assembleFaceGradients(
     const auto& mesh = primal.mesh;
     faceGrad.assign(mesh.nFaces, FaceGeomGrad{});
 
-    std::vector<double> ownerGradHx;
-    std::vector<double> ownerGradHy;
-
-    ownerGradHx.resize(primal.Nv, 0.0);
-    ownerGradHy.resize(primal.Nv, 0.0);
+    std::vector<double> gradh;
+    gradh.resize(primal.Nv * dim * Nvdf);
 
     for (int facei = mesh.nInternalFaces; facei < mesh.nFaces; ++facei) {
         const auto& f = mesh.faces[facei];
@@ -413,15 +441,15 @@ void BoundarySensitivityAssembler::assembleFaceGradients(
         FaceGeomGrad g;
 
         // compute gradient of owner cell
-        computeOwnerCellGradient(primal, owner, ownerGradHx, ownerGradHy);
+        computeOwnerCellGradient(primal, owner, gradh);
 
         // objective terms
         accumulate_dJdA_dJdn(primal, facei, g);
-        accumulate_dJdC(primal, facei, ownerGradHx, ownerGradHy, g);
+        accumulate_dJdC(primal, facei, gradh, g);
 
         // boundary constraint terms
         accumulate_dBwdn(primal, adjoint, facei, g);
-        accumulate_dBwdC(primal, adjoint, facei, ownerGradHx, ownerGradHy, g);
+        accumulate_dBwdC(primal, adjoint, facei, gradh, g);
 
         // sum
         g.dLdA = g.dJdA;

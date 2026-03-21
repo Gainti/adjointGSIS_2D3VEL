@@ -14,15 +14,17 @@ adjointDVM::adjointDVM(const Mesh& mesh,
     Nv(cfg.Nv),
     Vx(vel.Vx),
     Vy(vel.Vy),
-    c2(vel.c2),
+    v2(vel.v2),
     feq(vel.feq),
-    weight(vel.weight)
+    weight(vel.weight),
+    weight_macro(vel.weight_macro),
+    weight_coll(vel.weight_coll)
 {
     MPI_Comm_rank(comm,&rank);
     MPI_Comm_size(comm,&size);
 
-    avdf.resize(Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
-    arhs.resize(Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
+    avdf.resize(Nvdf*Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
+    arhs.resize(Nvdf*Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
     amacro.resize((mesh.nCells + mesh.nBoundaryFaces) * Namacro, Zero);
 
     // pseudo time step
@@ -41,29 +43,28 @@ adjointDVM::adjointDVM(const Mesh& mesh,
 void adjointDVM::updateAdjMacro() {
     double up_local[4]={0.0},down_local[4]={0.0};
     for(size_t cellI=0; cellI<mesh.nCells+mesh.nBoundaryFaces; ++cellI) {
-        scalar a[6] = {Zero};
+        scalar amacro_t[6] = {Zero};
 
         for(size_t vi=0; vi<Nv; ++vi) {
             int idx = index_vdf(cellI, vi);
             scalar phi1 = avdf[idx];
-
-            a[0] += phi1 * feq[vi] * weight[vi];
-            a[1] += 2.0 * Vx[vi] * phi1 * feq[vi] * weight[vi];
-            a[2] += 2.0 * Vy[vi] * phi1 * feq[vi] * weight[vi];
-            a[3] += (c2[vi]-1.5)*phi1 * feq[vi] * weight[vi];
-            a[4] += (4.0/15.0) * (c2[vi]-2.5)*phi1 * Vx[vi] * feq[vi] * weight[vi];
-            a[5] += (4.0/15.0) * (c2[vi]-2.5)*phi1 * Vy[vi] * feq[vi] * weight[vi];
+            scalar phi2 = avdf[idx+1];
+            double fw = feq[vi] * weight[vi];
+            for(int i=0;i<Nmacro;i++){
+                amacro_t[i]+=fw*(phi1*weight_coll[vi][i*2]
+                    +phi2*weight_coll[vi][i*2+1]);
+            }
         }
         if(cellI<mesh.nCells){
             double V=mesh.cells[cellI].V;
             for(int i=0;i<4;i++){
                 scalar amacro_old = amacro[cellI*Namacro+i];
-                up_local[i]+=(amacro_old-a[i])*(amacro_old-a[i])*V;
-                down_local[i]+=a[i]*a[i]*V;
+                up_local[i]+=(amacro_old-amacro_t[i])*(amacro_old-amacro_t[i])*V;
+                down_local[i]+=amacro_t[i]*amacro_t[i]*V;
             }
         }
         for(int k=0;k<Namacro;k++) {
-            amacro[cellI*Namacro+k] = a[k];
+            amacro[cellI*Namacro+k] = amacro_t[k];
         }
     }
     double up_global[4]={0.0}, down_global[4]={0.0};
@@ -86,23 +87,27 @@ void adjointDVM::diffuseWall(int facei) {
 
     scalar rhor = Zero;
     for (int vi = 0; vi < Nv; vi++) {
-        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
-        if (cn < 0.0) {
+        double vn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (vn < 0.0) {
             int idx_owner = index_vdf(owner, vi);
             int idx_neigh = index_vdf(neigh, vi);
-            avdf[idx_neigh] = avdf[idx_owner];
+            // zero-gradient
+            avdf[idx_neigh+0] = avdf[idx_owner+0];
+            avdf[idx_neigh+1] = avdf[idx_owner+1];
             double m = 0.0;
-            rhor += cn * feq[vi] * (avdf[idx_neigh] + m) * weight[vi];
+            rhor += vn * (avdf[idx_neigh+0] + avdf[idx_neigh+1] + m) 
+            * feq[vi]*weight[vi];
         }
     }
 
     for (int vi = 0; vi < Nv; vi++) {
-        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
-        if (cn > 0.0) {
+        double vn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (vn > 0.0) {
             int idx_neigh = index_vdf(neigh, vi);
             double m = 0.0;
             double temp = -m - 2.0 * sqrtPI * rhor;
-            avdf[idx_neigh] = temp;
+            avdf[idx_neigh+0] = temp;
+            avdf[idx_neigh+1] = 0.0;
         }
     }
 }
@@ -116,23 +121,26 @@ void adjointDVM::diffuseWallwithObject(int facei) {
 
     scalar rhor = Zero;
     for (int vi = 0; vi < Nv; vi++) {
-        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
-        if (cn < 0.0) {
+        double vn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (vn < 0.0) {
             int idx_owner = index_vdf(owner, vi);
             int idx_neigh = index_vdf(neigh, vi);
-            avdf[idx_neigh] = avdf[idx_owner];
+            avdf[idx_neigh+0] = avdf[idx_owner+0];
+            avdf[idx_neigh+1] = avdf[idx_owner+1];
             double m = objectiveWeight(Vx[vi], Vy[vi]);
-            rhor += cn * feq[vi] * (avdf[idx_neigh] + m) * weight[vi];
+            rhor += vn * (avdf[idx_neigh+0] + avdf[idx_neigh+1] + m) 
+            * feq[vi] * weight[vi];
         }
     }
 
     for (int vi = 0; vi < Nv; vi++) {
-        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
-        if (cn > 0.0) {
+        double vn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (vn > 0.0) {
             int idx_neigh = index_vdf(neigh, vi);
             double m = objectiveWeight(Vx[vi], Vy[vi]);
             double temp = -m - 2.0 * sqrtPI * rhor;
-            avdf[idx_neigh] = temp;
+            avdf[idx_neigh+0] = temp;
+            avdf[idx_neigh+1] = 0.0;
         }
     }
 }
@@ -153,22 +161,16 @@ void adjointDVM::getAdjRhs() {
 
     for(size_t cellI=0; cellI<mesh.nOwned; ++cellI) {
         double V = mesh.cells[cellI].V;
-
-        scalar arho = amacro[cellI*Namacro+0];
-        scalar aux  = amacro[cellI*Namacro+1];
-        scalar auy  = amacro[cellI*Namacro+2];
-        scalar atau = amacro[cellI*Namacro+3];
-        scalar aqx  = amacro[cellI*Namacro+4];
-        scalar aqy  = amacro[cellI*Namacro+5];
-
         for(size_t vi=0; vi<Nv; ++vi) {
-            int idx = index_vdf(cellI, vi);
-
-            scalar udotv = aux*Vx[vi] + auy*Vy[vi];
-            scalar qdotv = aqx*Vx[vi] + aqy*Vy[vi];
-
-            scalar coll = arho + udotv + (2.0/3.0*c2[vi]-1.0)*atau + (c2[vi]-2.5)*qdotv;
-            arhs[idx]   = cfg.delta * V * coll;
+            int idx_vdf = index_vdf(cellI, vi);
+            // collision
+            scalar coll[2]={Zero};
+            for(int i=0;i<Nmacro;i++){
+                coll[0]+=weight_macro[vi][i*2]*amacro[cellI*Nmacro+i];
+                coll[1]+=weight_macro[vi][i*2+1]*amacro[cellI*Nmacro+i];
+            }
+            arhs[idx_vdf]   = cfg.delta * V * coll[0];
+            arhs[idx_vdf+1] = cfg.delta * V * coll[1];
         }
     }
 
@@ -183,21 +185,26 @@ void adjointDVM::getAdjRhs() {
         vector xof = faces[faceI].Cf -cells[owner].C;
         vector xnf = faces[faceI].Cf -cells[neigh].C;
 
-        scalar dhdx,dhdy;
+        scalar dphi[Nvdf*dim];// (i,j) i*dim+j
 
         for(size_t vi=0;vi<Nv;vi++) {
             double phi = -(Sf.x*Vx[vi] + Sf.y*Vy[vi]);
+            int idx_owner = index_vdf(owner, vi);
+            int idx_neigh = index_vdf(neigh, vi);
+            scalar temp[Nvdf];
             if (phi>0.0) {
                 // º∆À„Ã›∂»
-                grad(owner,vi,dhdx,dhdy);
-                scalar temp = phi*(dhdx*xof.x + dhdy*xof.y);
-                arhs[owner*Nv+vi]-= temp;
-                arhs[neigh*Nv+vi]+= temp;
+                grad(owner,vi,dphi,Nvdf);
+                temp[0] = phi*(dphi[0]*xof.x + dphi[1]*xof.y);
+                temp[1] = phi*(dphi[2]*xof.x + dphi[3]*xof.y);
             }else{
-                grad(neigh,vi,dhdx,dhdy);
-                scalar temp = phi*(dhdx*xnf.x + dhdy*xnf.y);
-                arhs[owner*Nv+vi]-= temp;
-                arhs[neigh*Nv+vi]+= temp;
+                grad(neigh,vi,dphi,Nvdf);
+                temp[0] = phi*(dphi[0]*xnf.x + dphi[1]*xnf.y);
+                temp[1] = phi*(dphi[2]*xnf.x + dphi[3]*xnf.y);
+            }
+            for(int i=0;i<Nvdf;i++){
+                arhs[idx_owner+i]-= temp[i];
+                arhs[idx_neigh+i]+= temp[i];
             }
         }
     }
@@ -211,7 +218,7 @@ void adjointDVM::cellIterAdj(int cellI) {
 
     for(size_t vi=0; vi<Nv; ++vi) {
         scalar diag = (cfg.delta + invdt[cellI]) * V;
-        scalar res = Zero;
+        scalar res[2] = {Zero};
 
         int idx_cell = index_vdf(cellI, vi);
 
@@ -230,20 +237,24 @@ void adjointDVM::cellIterAdj(int cellI) {
                 if(phi >= 0.0) {
                     diag += phi;
                 } else {
-                    res -= phi * avdf[idx_neigh];
+                    res[0] -= phi * avdf[idx_neigh+0];
+                    res[1] -= phi * avdf[idx_neigh+1];
                 }
             } else {
                 if(phi >= 0.0) {
-                    res += phi * avdf[idx_owner];
+                    res[0] += phi * avdf[idx_owner+0];
+                    res[1] += phi * avdf[idx_owner+1];
                 } else {
                     diag -= phi;
                 }
             }
         }
 
-        res += invdt[cellI] * V * avdf[idx_cell];
+        res[0] += invdt[cellI] * V * avdf[idx_cell+0];
+        res[1] += invdt[cellI] * V * avdf[idx_cell+1];
 
-        avdf[idx_cell]   = (arhs[idx_cell]   + res) / diag;
+        avdf[idx_cell+0] = (arhs[idx_cell+0]   + res[0]) / diag;
+        avdf[idx_cell+1] = (arhs[idx_cell+1]   + res[1]) / diag;
     }
 }
 void adjointDVM::lusgsIterAdj() {
@@ -289,22 +300,29 @@ void adjointDVM::step(int iter){
             iter, res_aux, res_auy, res_arho, res_atau);
     }
 }
-
-void adjointDVM::grad(int cellI,int vi, double& gradx, double& grady){
+void adjointDVM::grad(int cellI,int vi, scalar* gradh,int nvdf){
     const auto& cell  = mesh.cells[cellI];
     const auto& faces = mesh.faces;
 
+    if(nvdf>Nvdf || nvdf<=0){
+        printf("Error: nvdf exceeds the maximum value.\n");
+        return;
+    }
+
     const double V = cell.V;
     if (V <= 1e-30) {
-        gradx = 0.0;
-        grady = 0.0;
+        for(int i=0;i<nvdf;i++){
+            for(int j=0;j<dim;j++){
+                gradh[i*dim+j] = Zero;
+            }
+        }
         return;
     }
     const auto& face_ids = cell.cell2face;
     const int nf = static_cast<int>(face_ids.size());
 
-    double dh = 0.0;
-    double b[2] = {0.0,0.0};
+    scalar dh[nvdf] = {Zero};
+    scalar b[nvdf*dim] = {Zero};
     for (int k = 0; k < nf; ++k) {
         const int faceI = face_ids[k];
         const Face& f = faces[faceI];
@@ -312,15 +330,26 @@ void adjointDVM::grad(int cellI,int vi, double& gradx, double& grady){
         int owner = f.owner;
         int neigh = f.neigh;
 
+        int idx_owner = index_vdf(owner, vi);
+        int idx_neigh = index_vdf(neigh, vi);
         if(cellI==owner){
-            dh = avdf[neigh*Nv + vi] - avdf[owner*Nv + vi];
+            for(int i=0;i<nvdf;i++){
+                dh[i] = avdf[idx_neigh+i] - avdf[idx_owner+i];
+            }
         }else{
-            dh = avdf[owner*Nv + vi] - avdf[neigh*Nv + vi];
+            for(int i=0;i<nvdf;i++){
+                dh[i] = avdf[idx_owner+i] - avdf[idx_neigh+i];
+            }
         }
-        b[0] += dh * cell.dxyz[k][0];
-        b[1] += dh * cell.dxyz[k][1];
+        for(int i=0;i<nvdf;i++){
+            for(int j=0;j<dim;j++){
+                b[i*dim+j] += dh[i] * cell.dxyz[k][j];
+            }
+        }
     }
     const auto& invA = cell.invA;
-    gradx = invA[0]*b[0] + invA[1]*b[1];
-    grady = invA[1]*b[0] + invA[2]*b[1];
+    for(int i=0;i<nvdf;i++){
+        gradh[i*dim+0] = invA[0]*b[i*dim+0] + invA[1]*b[i*dim+1];
+        gradh[i*dim+1] = invA[1]*b[i*dim+0] + invA[2]*b[i*dim+1];
+    }
 }

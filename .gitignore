@@ -522,3 +522,15 @@ build/Debug/CMakeFiles/solver.dir/compiler_depend.internal
 cases/demo/config.ini
 cases/demo/mesh/4w.cas
 cases/demo/mesh/25w.cas
+build/CMakeFiles/solver.dir/src/app/app.cpp.o
+build/CMakeFiles/solver.dir/src/app/app.cpp.o.d
+build/CMakeFiles/solver.dir/src/app/readConfig.cpp.o
+build/CMakeFiles/solver.dir/src/app/readConfig.cpp.o.d
+build/CMakeFiles/solver.dir/src/app/readMesh.cpp.o
+build/CMakeFiles/solver.dir/src/app/readMesh.cpp.o.d
+build/CMakeFiles/solver.dir/src/shape/meshDeform.cpp.o
+build/CMakeFiles/solver.dir/src/shape/meshDeform.cpp.o.d
+cases/demo/config.ini
+cases/demo/mesh/4w copy.cas
+cases/demo/mesh/25w copy.cas
+cases/demo/output/adj_macro.szplt

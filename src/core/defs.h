@@ -1,8 +1,8 @@
 #pragma once
 
 constexpr int dim = 2;
-constexpr int Nmacro = 10; // rho,ux,uy,tau,qx,qy,pxx,pxy,pyx,pyy
-constexpr int Nhot = 6; // stress_{xx,xy,yx,yy} + heat_{x,y}
+constexpr int Nvdf = 2;
+constexpr int Nmacro = 6; // rho,ux,uy,tau,qx,qy
 constexpr int Namacro = 6; // rho, aux, auy, atau, aqx, aqy
 
 struct SolverConfig {
@@ -14,8 +14,8 @@ struct SolverConfig {
     double Pr=0.0;
     double St=0.0;
     // velocity grid
-    int  Nvx, Nvy, Nvz, Nv;
-    double Lvx, Lvy,Lvz;
+    int  Nvx, Nvy, Nv;
+    double Lvx, Lvy;
     // iteration 
     int max_iter = 20000;
     double tol = 1e-5;

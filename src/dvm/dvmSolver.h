@@ -11,8 +11,6 @@
 #include "profiler.h"
 #include "velocitySpace.h"
 
-
-
 class dvmSolver {
 public:
     // config
@@ -24,18 +22,18 @@ public:
     // mesh
     const Mesh &mesh;
     const int Nv;
-    const std::vector<double> &Vx,&Vy,&Vz;
+    const std::vector<double> &Vx,&Vy;
     const std::vector<double>& weight;
-    const std::vector<double>& c2;
+    const std::vector<double>& v2;
     const std::vector<double>& feq;
-    const std::vector<double>& exp_c2;
-    const std::vector<std::array<double, Nmacro>>& weight_macro;
+    const std::vector<std::array<double, Nmacro*2>> &weight_macro,&weight_coll;
     // vdf
     std::vector<scalar> vdf,rhs;
     HaloWorkspace halo_ws;
     // macro
     std::vector<scalar> macro;
-    std::vector<scalar> hot;
+    std::vector<scalar> stress,hot_stress;// dim*dim
+    std::vector<scalar> hot_heat;// dim
     // beta
     std::vector<double> beta;
     // 1/dt
@@ -52,7 +50,7 @@ public:
     ~dvmSolver(){}
 
     inline int index_vdf(int celli,int vi){
-        return celli*Nv+vi;
+        return celli*Nv*Nvdf+vi*Nvdf;
     }
 
     // primal
@@ -65,7 +63,7 @@ public:
     void lusgsIter();
     void cellIter(int cellI);
     void sweepCells(const std::vector<int>& cellList, bool forward);
-    void grad(int cellI,int vi, double& gradx, double& grady);
+    void grad(int cellI,int vi, scalar* gradh,int nvdf);
 
     void reportProfile() const {
         profiler.report(comm, rank, "[DVM profile summary]");

@@ -24,11 +24,9 @@ void printConfig(const SolverConfig& cfg, int rank) {
     printf("\n[velocity space]\n");
     printf("  Nvx             = %d\n", cfg.Nvx);
     printf("  Nvy             = %d\n", cfg.Nvy);
-    printf("  Nvz             = %d\n", cfg.Nvz);
     printf("  Nv              = %d\n", cfg.Nv);
     printf("  Lvx             = %.12g\n", cfg.Lvx);
     printf("  Lvy             = %.12g\n", cfg.Lvy);
-    printf("  Lvz             = %.12g\n", cfg.Lvz);
 
     printf("\n[iteration]\n");
     printf("  max_iter        = %d\n", cfg.max_iter);
@@ -90,12 +88,10 @@ bool readCaseConfig(int argc, char** argv,
 
     scfg.Nvx = cfg.get_int("solver", "Nvx", 0);
     scfg.Nvy = cfg.get_int("solver", "Nvy", 0);
-    scfg.Nvz = cfg.get_int("solver", "Nvz", 0);
-    scfg.Nv  = scfg.Nvx * scfg.Nvy * scfg.Nvz;
+    scfg.Nv  = scfg.Nvx * scfg.Nvy;
 
     scfg.Lvx = cfg.get_double("solver", "Lvx", 0.0);
     scfg.Lvy = cfg.get_double("solver", "Lvy", 0.0);
-    scfg.Lvz = cfg.get_double("solver", "Lvz", 0.0);
 
     scfg.max_iter       = cfg.get_int("solver", "maxIter", 2000);
     scfg.tol            = cfg.get_double("solver", "tol", 1e-5);

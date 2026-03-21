@@ -91,87 +91,87 @@ bool validateOneBoundaryPoint(const Mesh& base_mesh,
     // ADJ
     double g_adj = 0.0;
     dvmSolver solver(base_mesh, vel, cfg, comm);
-    // for (int iter = 1; iter < cfg.max_iter; ++iter)
-    // {
-    //     solver.step(iter);
+    for (int iter = 1; iter < cfg.max_iter; ++iter)
+    {
+        solver.step(iter);
 
-    //     if (solver.res_rho < cfg.tol &&
-    //         solver.res_ux  < cfg.tol &&
-    //         solver.res_uy  < cfg.tol)
-    //     {
-    //         break;
-    //     }
-    // }
+        if (solver.res_rho < cfg.tol &&
+            solver.res_ux  < cfg.tol &&
+            solver.res_uy  < cfg.tol)
+        {
+            break;
+        }
+    }
     double J0 = computeObjective(solver);
 
-    // adjointDVM adj(solver);
-    // for (int iter = 1; iter < cfg.max_iter; ++iter)
-    // {
-    //     adj.step(iter);
+    adjointDVM adj(base_mesh, vel, cfg, comm);
+    for (int iter = 1; iter < cfg.max_iter; ++iter)
+    {
+        adj.step(iter);
 
-    //     if (adj.res_arho < cfg.tol &&
-    //         adj.res_aux  < cfg.tol &&
-    //         adj.res_auy  < cfg.tol)
-    //     {
-    //         break;
-    //     }
-    // }
+        if (adj.res_arho < cfg.tol &&
+            adj.res_aux  < cfg.tol &&
+            adj.res_auy  < cfg.tol)
+        {
+            break;
+        }
+    }
     // ¼ÆËã°éËæµ¼Êý
-    // BoundarySensitivityAssembler assembler;
-    // std::vector<FaceGeomGrad> faceGrad;
-    // std::vector<NodeGrad> nodeGrad;
-    // assembler.assembleFaceGradients(solver, adj, faceGrad);
-    // assembler.accumulateNodeGradients(base_mesh, faceGrad, nodeGrad);
+    BoundarySensitivityAssembler assembler;
+    std::vector<FaceGeomGrad> faceGrad;
+    std::vector<NodeGrad> nodeGrad;
+    assembler.assembleFaceGradients(solver, adj, faceGrad);
+    assembler.accumulateNodeGradients(base_mesh, faceGrad, nodeGrad);
 
-    // g_adj = (coord == 0) ? nodeGrad[point_id].dx : nodeGrad[point_id].dy;
+    g_adj = (coord == 0) ? nodeGrad[point_id].dx : nodeGrad[point_id].dy;
 
-    // std::vector<char> isBoundary(base_mesh.points.size(), 0);
-    // for (int facei = base_mesh.nInternalFaces; facei < base_mesh.nFaces; ++facei) {
-    //     const auto& f = base_mesh.faces[facei];
-    //     if(f.bc_type == BCType::internal) continue;
-    //     isBoundary[f.n1] = 1;
-    //     isBoundary[f.n2] = 1;
-    // }
-    // for(int pointI=0; pointI<base_mesh.points.size(); ++pointI){
-    //     if(isBoundary[pointI]){
-    //         printf("point %d: x = %e, y= %e, dJ/dx = %e, dJ/dy = %e\n", pointI, base_mesh.points[pointI].x, base_mesh.points[pointI].y, nodeGrad[pointI].dx, nodeGrad[pointI].dy);
-    //     }
-    // }
+    std::vector<char> isBoundary(base_mesh.points.size(), 0);
+    for (int facei = base_mesh.nInternalFaces; facei < base_mesh.nFaces; ++facei) {
+        const auto& f = base_mesh.faces[facei];
+        if(f.bc_type == BCType::internal) continue;
+        isBoundary[f.n1] = 1;
+        isBoundary[f.n2] = 1;
+    }
+    for(int pointI=0; pointI<base_mesh.points.size(); ++pointI){
+        if(isBoundary[pointI]){
+            printf("point %d: x = %e, y= %e, dJ/dx = %e, dJ/dy = %e\n", pointI, base_mesh.points[pointI].x, base_mesh.points[pointI].y, nodeGrad[pointI].dx, nodeGrad[pointI].dy);
+        }
+    }
 
     // FD
-    Mesh plus_mesh = base_mesh;
-    Mesh minus_mesh = base_mesh;
+    // Mesh plus_mesh = base_mesh;
+    // Mesh minus_mesh = base_mesh;
 
-    const double href = localReferenceLength(base_mesh, point_id);
-    const double eps = eps_scale * href;
+    // const double href = localReferenceLength(base_mesh, point_id);
+    // const double eps = eps_scale * href;
 
-    perturbOnePoint(plus_mesh,  point_id, coord, +eps);
-    perturbOnePoint(minus_mesh, point_id, coord, -eps);
+    // perturbOnePoint(plus_mesh,  point_id, coord, +eps);
+    // perturbOnePoint(minus_mesh, point_id, coord, -eps);
 
-    computeGeometry(plus_mesh, comm);
-    computeGeometry(minus_mesh, comm);
+    // computeGeometry(plus_mesh, comm);
+    // computeGeometry(minus_mesh, comm);
 
-    const double Jp = runPrimalAndEvalJ(plus_mesh, vel, cfg, comm);
-    const double Jm = runPrimalAndEvalJ(minus_mesh, vel, cfg, comm);
-    const double g_fd   = (Jp - Jm) / (2.0 * eps);
+    // const double Jp = runPrimalAndEvalJ(plus_mesh, vel, cfg, comm);
+    // const double Jm = runPrimalAndEvalJ(minus_mesh, vel, cfg, comm);
+    // const double g_fd   = (Jp - Jm) / (2.0 * eps);
 
-    // compare with adjoint gradient
-    const double rel_err = std::fabs(g_fd - g_adj) / g_fd;
-    const double abs_err = std::fabs(g_fd - g_adj);
+    // // compare with adjoint gradient
+    // const double rel_err = std::fabs(g_fd - g_adj) / g_fd;
+    // const double abs_err = std::fabs(g_fd - g_adj);
 
-    std::printf(
-        "[validation] point=%d coord=%c eps=%.6e\n"
-        "  J0   = %.12e\n"
-        "  J+   = %.12e\n"
-        "  J-   = %.12e\n"
-        "  FD   = %.12e\n"
-        "  ADJ  = %.12e\n"
-        "  REL  = %.12e\n"
-        "  ABS  = %.12e\n",
-        point_id,
-        (coord == 0 ? 'x' : 'y'),
-        eps,
-        J0, Jp, Jm, g_fd, g_adj, rel_err, abs_err);
+    // std::printf(
+    //     "[validation] point=%d coord=%c eps=%.6e\n"
+    //     "  J0   = %.12e\n"
+    //     "  J+   = %.12e\n"
+    //     "  J-   = %.12e\n"
+    //     "  FD   = %.12e\n"
+    //     "  ADJ  = %.12e\n"
+    //     "  REL  = %.12e\n"
+    //     "  ABS  = %.12e\n",
+    //     point_id,
+    //     (coord == 0 ? 'x' : 'y'),
+    //     eps,
+    //     J0, Jp, Jm, g_fd, g_adj, rel_err, abs_err);
 
     return true;
 }

@@ -7,12 +7,13 @@
 #include <vector>
 
 struct VelocitySpace {
-    std::vector<double> vx, vy, vz;
-    std::vector<double> weight_x, weight_y, weight_z;
-    std::vector<double> Vx, Vy, Vz;
+    std::vector<double> vx, vy;
+    std::vector<double> weight_x, weight_y;
+    std::vector<double> Vx, Vy;
     std::vector<double> weight;
-    std::vector<double> c2, feq, exp_c2;
-    std::vector<std::array<double, Nmacro>> weight_macro;
+    std::vector<double> v2, feq;
+    std::vector<std::array<double, Nmacro*2>> weight_macro;
+    std::vector<std::array<double, Nmacro*2>> weight_coll;
 
     bool build(const SolverConfig& cfg);
 

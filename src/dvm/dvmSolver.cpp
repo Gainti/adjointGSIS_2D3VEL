@@ -16,23 +16,21 @@ dvmSolver::dvmSolver(const Mesh& mesh,
     Nv(cfg.Nv),
     Vx(vel.Vx),
     Vy(vel.Vy),
-    Vz(vel.Vz),
     weight(vel.weight),
-    c2(vel.c2),
+    v2(vel.v2),
     feq(vel.feq),
-    exp_c2(vel.exp_c2),
-    weight_macro(vel.weight_macro)
+    weight_macro(vel.weight_macro),
+    weight_coll(vel.weight_coll)
 {
     MPI_Comm_rank(comm,&rank);
     MPI_Comm_size(comm,&size);
 
     // 为分布函数分配空间
     // 不仅存储单元内的值，还存储边界面的值
-    vdf.resize(Nv*(mesh.nCells+mesh.nBoundaryFaces));
-    rhs.resize(Nv*(mesh.nCells+mesh.nBoundaryFaces));
+    vdf.resize(Nvdf*Nv*(mesh.nCells+mesh.nBoundaryFaces));
+    rhs.resize(Nvdf*Nv*(mesh.nCells+mesh.nBoundaryFaces));
     // macro
     macro.resize((mesh.nCells+mesh.nBoundaryFaces)*Nmacro);
-    hot.resize((mesh.nCells+mesh.nBoundaryFaces)*Nhot);
     beta.resize(mesh.nCells);
     invdt.resize(mesh.nCells);
 
@@ -61,23 +59,29 @@ void dvmSolver::diffuseWall(int facei, double uwx, double uwy) {
 
     scalar rhor = Zero;
     for (int vi = 0; vi < Nv; vi++) {
-        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
-        if (cn > 0.0) {
+        double vn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (vn > 0.0) {
             int idx_owner = index_vdf(owner, vi);
             int idx_neigh = index_vdf(neigh, vi);
-            vdf[idx_neigh] = vdf[idx_owner];
-            rhor += cn * exp_c2[vi] * vdf[idx_neigh] * weight[vi] * 2.0 / PI;
+            // 零梯度近似
+            vdf[idx_neigh+0] = vdf[idx_owner+0];
+            vdf[idx_neigh+1] = vdf[idx_owner+1];
+
+            double h1 = vdf[idx_neigh+0];
+            rhor += vn * h1 * feq[vi] * weight[vi];
         }
     }
+    rhor*= 2.0*sqrtPI;
 
     double uwn = uwx * nf.x + uwy * nf.y;
     for (int vi = 0; vi < Nv; vi++) {
-        double cn = nf.x * Vx[vi] + nf.y * Vy[vi];
-        if (cn < 0.0) {
+        double vn = nf.x * Vx[vi] + nf.y * Vy[vi];
+        if (vn < 0.0) {
             int idx_neigh = index_vdf(neigh, vi);
             double udotv = uwx * Vx[vi] + uwy * Vy[vi];
             scalar temp = rhor - sqrtPI * uwn + 2.0 * udotv;
-            vdf[idx_neigh] = temp;
+            vdf[idx_neigh+0] = temp;
+            vdf[idx_neigh+1] = temp;
         }
     }
 }
@@ -123,11 +127,13 @@ void dvmSolver::updateMacro() {
         scalar macro_temp[Nmacro]={Zero};
 
         // 速度空间积分
-        int idx_vdf = cellI*Nv;
         for(size_t vi=0;vi<Nv;vi++){
-            scalar h1 = vdf[idx_vdf+vi];
+            int idx_vdf = index_vdf(cellI, vi);
+            scalar h1 = vdf[idx_vdf+0];
+            scalar h2 = vdf[idx_vdf+1];
+            double fw = feq[vi] * weight[vi];
             for(int i=0;i<Nmacro;i++){
-                macro_temp[i]+=h1*weight_macro[vi][i];
+                macro_temp[i]+=fw*(h1*weight_macro[vi][i*2]+h2*weight_macro[vi][i*2+1]);
             }
         }
         if(cellI<mesh.nCells){
@@ -164,20 +170,16 @@ void dvmSolver::getRhs() {
 
     for(size_t cellI=0;cellI<mesh.nOwned;cellI++) {
         double V=cells[cellI].V;
-        scalar rho=macro[cellI*Nmacro+0];
-        scalar ux=macro[cellI*Nmacro+1];
-        scalar uy=macro[cellI*Nmacro+2];
-        scalar tau=macro[cellI*Nmacro+3];
-        scalar qx=macro[cellI*Nmacro+4];
-        scalar qy=macro[cellI*Nmacro+5];
-
-        int cell_vdf = cellI*Nv;
         for(size_t vi=0;vi<Nv;vi++) {
+            int idx_vdf = index_vdf(cellI, vi);
             // collision
-            scalar udotv = ux*Vx[vi]+uy*Vy[vi];
-            scalar qdotv = qx*Vx[vi]+qy*Vy[vi];
-            scalar coll = rho + 2.0*udotv + (c2[vi]-1.5)*tau + (c2[vi]-2.5)*4.0/15.0*qdotv;
-            rhs[cell_vdf+vi]   = cfg.delta * V * coll;
+            scalar coll[2]={Zero};
+            for(int i=0;i<Nmacro;i++){
+                coll[0]+=weight_coll[vi][i*2]*macro[cellI*Nmacro+i];
+                coll[1]+=weight_coll[vi][i*2+1]*macro[cellI*Nmacro+i];
+            }
+            rhs[idx_vdf+0]   = cfg.delta * V * coll[0];
+            rhs[idx_vdf+1]   = cfg.delta * V * coll[1];
         }
     }
 
@@ -192,95 +194,76 @@ void dvmSolver::getRhs() {
         vector xof = faces[faceI].Cf -cells[owner].C;
         vector xnf = faces[faceI].Cf -cells[neigh].C;
 
-        scalar dhdx,dhdy;
+        scalar dh[Nvdf*dim];// (i,j) i*dim+j
 
         for(size_t vi=0;vi<Nv;vi++) {
             double phi = Sf.x*Vx[vi] + Sf.y*Vy[vi];
+            int idx_owner = index_vdf(owner, vi);
+            int idx_neigh = index_vdf(neigh, vi);
+            scalar temp[Nvdf];
             if (phi>0.0) {
                 // 计算梯度
-                grad(owner,vi,dhdx,dhdy);
-                scalar temp = phi*(dhdx*xof.x + dhdy*xof.y);
-                rhs[owner*Nv+vi]-= temp;
-                rhs[neigh*Nv+vi]+= temp;
+                grad(owner,vi,dh,Nvdf);
+                temp[0] = phi*(dh[0]*xof.x + dh[1]*xof.y);
+                temp[1] = phi*(dh[2]*xof.x + dh[3]*xof.y);
             }else{
-                grad(neigh,vi,dhdx,dhdy);
-                scalar temp = phi*(dhdx*xnf.x + dhdy*xnf.y);
-                rhs[owner*Nv+vi]-= temp;
-                rhs[neigh*Nv+vi]+= temp;
+                grad(neigh,vi,dh,Nvdf);
+                temp[0] = phi*(dh[0]*xnf.x + dh[1]*xnf.y);
+                temp[1] = phi*(dh[2]*xnf.x + dh[3]*xnf.y);
+            }
+            for(int i=0;i<Nvdf;i++){
+                rhs[idx_owner+i]-= temp[i];
+                rhs[idx_neigh+i]+= temp[i];
             }
         }
     }
 }
+
 void dvmSolver::cellIter(int cellI) {
-    if (cellI >= mesh.nOwned) return;
+    if(cellI >= mesh.nOwned) return;
 
     const auto& cell  = mesh.cells[cellI];
     const auto& faces = mesh.faces;
+    double V = cell.V;
 
-    const double V          = cell.V;
-    const double alpha_base = (cfg.delta + invdt[cellI]) * V;
-    const double beta_dt    = invdt[cellI] * V;
+    for(size_t vi=0; vi<Nv; ++vi) {
+        scalar diag = (cfg.delta + invdt[cellI]) * V;
+        scalar res[2] = {Zero};
 
-    const auto& face_ids = cell.cell2face;
-    const int nf = static_cast<int>(face_ids.size());
+        int idx_cell = index_vdf(cellI, vi);
 
-    int owner_nb_base[4], neigh_nb_base[4];
-    double owner_sfx[4], owner_sfy[4];
-    double neigh_sfx[4], neigh_sfy[4];
-    int n_owner = 0, n_neigh = 0;
+        for(auto faceI : cell.cell2face) {
+            const vector& Sf = faces[faceI].Sf;
+            double phi = Sf.x*Vx[vi] + Sf.y*Vy[vi];
 
-    for (int k = 0; k < nf; ++k) {
-        const int faceI = face_ids[k];
-        const Face& f = faces[faceI];
+            int owner = faces[faceI].owner;
+            int neigh = faces[faceI].neigh;
 
-        if (cellI == f.owner) {
-            owner_sfx[n_owner]    = f.Sf.x;
-            owner_sfy[n_owner]    = f.Sf.y;
-            owner_nb_base[n_owner] = f.neigh * Nv;
-            ++n_owner;
-        } else {
-            neigh_sfx[n_neigh]    = f.Sf.x;
-            neigh_sfy[n_neigh]    = f.Sf.y;
-            neigh_nb_base[n_neigh] = f.owner * Nv;
-            ++n_neigh;
-        }
-    }
+            int idx_owner = index_vdf(owner, vi);
+            int idx_neigh = index_vdf(neigh, vi);
 
-    const int base_cell = cellI * Nv;
-    const double* __restrict__ vxp  = Vx.data();
-    const double* __restrict__ vyp  = Vy.data();
-    const scalar* __restrict__ rhsp = rhs.data() + base_cell;
-    scalar* __restrict__ vcell      = vdf.data() + base_cell;
-
-
-    for (int vi = 0; vi < Nv; ++vi) {
-        const double vx = vxp[vi];
-        const double vy = vyp[vi];
-
-        double diag = alpha_base;
-        double res  = beta_dt * vcell[vi];
-
-        for (int k = 0; k < n_owner; ++k) {
-            const double phi  = owner_sfx[k] * vx + owner_sfy[k] * vy;
-            const double ppos = std::max(phi, 0.0);
-            const double pneg = std::min(phi, 0.0);
-            const scalar vnb  = vdf[owner_nb_base[k] + vi];
-
-            diag += ppos;
-            res  -= pneg * vnb;
+            if(cellI == owner) {
+                if(phi >= 0.0) {
+                    diag += phi;
+                } else {
+                    res[0] -= phi * vdf[idx_neigh+0];
+                    res[1] -= phi * vdf[idx_neigh+1];
+                }
+            } else {
+                if(phi >= 0.0) {
+                    res[0] += phi * vdf[idx_owner+0];
+                    res[1] += phi * vdf[idx_owner+1];
+                } else {
+                    diag -= phi;
+                }
+            }
         }
 
-        for (int k = 0; k < n_neigh; ++k) {
-            const double phi  = neigh_sfx[k] * vx + neigh_sfy[k] * vy;
-            const double ppos = std::max(phi, 0.0);
-            const double pneg = std::min(phi, 0.0);
-            const scalar vnb  = vdf[neigh_nb_base[k] + vi];
+        res[0] += invdt[cellI] * V * vdf[idx_cell+0];
+        res[1] += invdt[cellI] * V * vdf[idx_cell+1];
 
-            res  += ppos * vnb;
-            diag -= pneg;
-        }
-
-        vcell[vi] = (rhsp[vi] + res) / diag;
+        vdf[idx_cell+0] = (rhs[idx_cell+0] + res[0]) / diag;
+        vdf[idx_cell+1] = (rhs[idx_cell+1] + res[1]) / diag;
     }
 }
 // void dvmSolver::cellIter(int cellI) {
@@ -296,24 +279,25 @@ void dvmSolver::cellIter(int cellI) {
 //     const auto& face_ids = cell.cell2face;
 //     const int nf = static_cast<int>(face_ids.size());
 
-//     // 注意：如果非结构网格面数可能 > 8，这里必须改成更安全的容器或加断言
-//     int    nb_base[8];
-//     double sfx[8], sfy[8];
-//     int    owner_side[8];   // 1: cellI 是 owner, 0: cellI 是 neigh
+//     int owner_nb_base[4], neigh_nb_base[4];
+//     double owner_sfx[4], owner_sfy[4];
+//     double neigh_sfx[4], neigh_sfy[4];
+//     int n_owner = 0, n_neigh = 0;
 
 //     for (int k = 0; k < nf; ++k) {
 //         const int faceI = face_ids[k];
 //         const Face& f = faces[faceI];
 
-//         sfx[k] = f.Sf.x;
-//         sfy[k] = f.Sf.y;
-
 //         if (cellI == f.owner) {
-//             owner_side[k] = 1;
-//             nb_base[k]    = f.neigh * Nv;
+//             owner_sfx[n_owner]    = f.Sf.x;
+//             owner_sfy[n_owner]    = f.Sf.y;
+//             owner_nb_base[n_owner] = f.neigh * Nv;
+//             ++n_owner;
 //         } else {
-//             owner_side[k] = 0;
-//             nb_base[k]    = f.owner * Nv;
+//             neigh_sfx[n_neigh]    = f.Sf.x;
+//             neigh_sfy[n_neigh]    = f.Sf.y;
+//             neigh_nb_base[n_neigh] = f.owner * Nv;
+//             ++n_neigh;
 //         }
 //     }
 
@@ -323,8 +307,6 @@ void dvmSolver::cellIter(int cellI) {
 //     const scalar* __restrict__ rhsp = rhs.data() + base_cell;
 //     scalar* __restrict__ vcell      = vdf.data() + base_cell;
 
-//     // 告诉编译器：vxp/vyp/rhsp/vcell 都是线性连续的
-//     // 邻居数据是 gather，通常是向量化的主要障碍，但至少本 cell 相关部分会更容易优化
 
 //     for (int vi = 0; vi < Nv; ++vi) {
 //         const double vx = vxp[vi];
@@ -333,84 +315,29 @@ void dvmSolver::cellIter(int cellI) {
 //         double diag = alpha_base;
 //         double res  = beta_dt * vcell[vi];
 
-//         // 对每个面做固定形式更新，减少 if-else 分支
-//         for (int k = 0; k < nf; ++k) {
-//             const double phi  = sfx[k] * vx + sfy[k] * vy;
+//         for (int k = 0; k < n_owner; ++k) {
+//             const double phi  = owner_sfx[k] * vx + owner_sfy[k] * vy;
 //             const double ppos = std::max(phi, 0.0);
 //             const double pneg = std::min(phi, 0.0);
+//             const scalar vnb  = vdf[owner_nb_base[k] + vi];
 
-//             const scalar vnb = vdf[nb_base[k] + vi];
+//             diag += ppos;
+//             res  -= pneg * vnb;
+//         }
 
-//             if (owner_side[k]) {
-//                 diag += ppos;
-//                 res  -= pneg * vnb;
-//             } else {
-//                 res  += ppos * vnb;
-//                 diag -= pneg;
-//             }
+//         for (int k = 0; k < n_neigh; ++k) {
+//             const double phi  = neigh_sfx[k] * vx + neigh_sfy[k] * vy;
+//             const double ppos = std::max(phi, 0.0);
+//             const double pneg = std::min(phi, 0.0);
+//             const scalar vnb  = vdf[neigh_nb_base[k] + vi];
+
+//             res  += ppos * vnb;
+//             diag -= pneg;
 //         }
 
 //         vcell[vi] = (rhsp[vi] + res) / diag;
 //     }
 // }
-
-// void dvmSolver::cellIter(int cellI) {
-//     if(cellI >= mesh.nOwned) return;
-//     const auto& cell  = mesh.cells[cellI];
-//     const auto& faces = mesh.faces;
-
-//     const double V = cell.V;
-//     const double alpha_base = (cfg.delta + invdt[cellI]) * V;
-//     const double beta_dt    = invdt[cellI] * V;
-
-//     const auto& face_ids = cell.cell2face;
-//     const int nf = face_ids.size();
-
-//     // 预提取当前cell每个face的常量信息
-//     int neigh_id[8];
-//     double sfx[8], sfy[8];
-//     int orient[8]; // +1: cellI == owner, -1: cellI == neigh
-
-//     for (int k = 0; k < nf; ++k) {
-//         int faceI = face_ids[k];
-//         const Face& f = faces[faceI];
-
-//         sfx[k] = f.Sf.x;
-//         sfy[k] = f.Sf.y;
-
-//         if (cellI == f.owner) {
-//             orient[k]  = +1;
-//             neigh_id[k] = f.neigh;
-//         } else {
-//             orient[k]  = -1;
-//             neigh_id[k] = f.owner;
-//         }
-//     }
-
-//     const int base_cell = cellI * Nv;
-
-//     for (int vi = 0; vi < Nv; ++vi) {
-//         scalar diag = alpha_base;
-//         scalar res  = beta_dt * vdf[base_cell + vi];
-
-//         const double vx = Vx[vi];
-//         const double vy = Vy[vi];
-
-//         for (int k = 0; k < nf; ++k) {
-//             const double phi = sfx[k] * vx + sfy[k] * vy;
-//             const int idx_nb = neigh_id[k] * Nv + vi;
-
-//             if (orient[k] > 0) {
-//                 if (phi >= 0.0) diag += phi;
-//                 else            res  -= phi * vdf[idx_nb];
-//             } else {
-//                 if (phi >= 0.0) res  += phi * vdf[idx_nb];
-//                 else            diag -= phi;
-//             }
-//         }
-//         vdf[base_cell + vi] = (rhs[base_cell + vi] + res) / diag;
-//     }
-//  }
 
 void dvmSolver::sweepCells(const std::vector<int>& cellList, bool forward)
 {
@@ -424,7 +351,6 @@ void dvmSolver::sweepCells(const std::vector<int>& cellList, bool forward)
         }
     }
 }
-
 
 void dvmSolver::lusgsIter()
 {
@@ -512,21 +438,29 @@ void dvmSolver::step(int iter) {
     }
 }
 
-void dvmSolver::grad(int cellI,int vi, double& gradx, double& grady){
+void dvmSolver::grad(int cellI,int vi, scalar* gradh,int nvdf){
     const auto& cell  = mesh.cells[cellI];
     const auto& faces = mesh.faces;
 
+    if(nvdf>Nvdf || nvdf<=0){
+        printf("Error: nvdf exceeds the maximum value.\n");
+        return;
+    }
+
     const double V = cell.V;
     if (V <= 1e-30) {
-        gradx = 0.0;
-        grady = 0.0;
+        for(int i=0;i<nvdf;i++){
+            for(int j=0;j<dim;j++){
+                gradh[i*dim+j] = Zero;
+            }
+        }
         return;
     }
     const auto& face_ids = cell.cell2face;
     const int nf = static_cast<int>(face_ids.size());
 
-    double dh = 0.0;
-    double b[2] = {0.0,0.0};
+    scalar dh[nvdf] = {Zero};
+    scalar b[nvdf*dim] = {Zero};
     for (int k = 0; k < nf; ++k) {
         const int faceI = face_ids[k];
         const Face& f = faces[faceI];
@@ -534,15 +468,26 @@ void dvmSolver::grad(int cellI,int vi, double& gradx, double& grady){
         int owner = f.owner;
         int neigh = f.neigh;
 
+        int idx_owner = index_vdf(owner, vi);
+        int idx_neigh = index_vdf(neigh, vi);
         if(cellI==owner){
-            dh = vdf[neigh*Nv + vi] - vdf[owner*Nv + vi];
+            for(int i=0;i<nvdf;i++){
+                dh[i] = vdf[idx_neigh+i] - vdf[idx_owner+i];
+            }
         }else{
-            dh = vdf[owner*Nv + vi] - vdf[neigh*Nv + vi];
+            for(int i=0;i<nvdf;i++){
+                dh[i] = vdf[idx_owner+i] - vdf[idx_neigh+i];
+            }
         }
-        b[0] += dh * cell.dxyz[k][0];
-        b[1] += dh * cell.dxyz[k][1];
+        for(int i=0;i<nvdf;i++){
+            for(int j=0;j<dim;j++){
+                b[i*dim+j] += dh[i] * cell.dxyz[k][j];
+            }
+        }
     }
     const auto& invA = cell.invA;
-    gradx = invA[0]*b[0] + invA[1]*b[1];
-    grady = invA[1]*b[0] + invA[2]*b[1];
+    for(int i=0;i<nvdf;i++){
+        gradh[i*dim+0] = invA[0]*b[i*dim+0] + invA[1]*b[i*dim+1];
+        gradh[i*dim+1] = invA[1]*b[i*dim+0] + invA[2]*b[i*dim+1];
+    }
 }

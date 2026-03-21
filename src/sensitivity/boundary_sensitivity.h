@@ -89,8 +89,7 @@ private:
     static void computeOwnerCellGradient(
         dvmSolver& primal,
         int owner,
-        std::vector<double>& gradHx,
-        std::vector<double>& gradHy);
+        std::vector<double>& gradh);
 
     static void accumulate_dJdA_dJdn(
         dvmSolver& primal,
@@ -100,8 +99,7 @@ private:
     static void accumulate_dJdC(
         dvmSolver& primal,
         int facei,
-        const std::vector<double>& gradHx,
-        const std::vector<double>& gradHy,
+        const std::vector<double>& gradh,
         FaceGeomGrad& g);
 
     static void accumulate_dBwdn(
@@ -114,8 +112,7 @@ private:
         dvmSolver& primal,
         const adjointDVM& adjoint,
         int facei,
-        const std::vector<double>& gradHx,
-        const std::vector<double>& gradHy,
+        const std::vector<double>& gradh,
         FaceGeomGrad& g);
 };
 
