@@ -3,28 +3,36 @@
 #include <algorithm>
 #include <cmath>
 
-adjointDVM::adjointDVM(dvmSolver& primal)
-    : primal(primal),
-      mesh(primal.mesh),
-      cfg(primal.cfg),
-      comm(primal.comm),
-      rank(primal.rank),
-      size(primal.size),
-      Nv(primal.Nv),
-      Vx(primal.Vx),
-      Vy(primal.Vy),
-      c2(primal.c2),
-      feq(primal.feq),
-      weight(primal.weight),
-      invdt(primal.invdt),
-      res_aux(0.0),
-      res_auy(0.0),
-      res_arho(0.0),
-      res_atau(0.0)
+adjointDVM::adjointDVM(const Mesh& mesh,
+    const VelocitySpace& vel,
+    const SolverConfig& cfg,
+    MPI_Comm comm
+)
+    :mesh(mesh),
+    cfg(cfg),
+    comm(comm),
+    Nv(cfg.Nv),
+    Vx(vel.Vx),
+    Vy(vel.Vy),
+    c2(vel.c2),
+    feq(vel.feq),
+    weight(vel.weight)
 {
+    MPI_Comm_rank(comm,&rank);
+    MPI_Comm_size(comm,&size);
+
     avdf.resize(Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
     arhs.resize(Nv * (mesh.nCells + mesh.nBoundaryFaces), Zero);
     amacro.resize((mesh.nCells + mesh.nBoundaryFaces) * Namacro, Zero);
+
+    // pseudo time step
+    invdt.resize(mesh.nCells, 0.0);
+    for(int celli=0;celli<mesh.nCells;celli++){
+        invdt[celli]=0.0;
+    }
+
+    // fill avdf with zero
+    std::fill(avdf.begin(),avdf.end(),Zero);
 
     adjointBoundarySet();
     updateAdjMacro();

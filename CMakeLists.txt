@@ -11,9 +11,9 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 
 find_package(MPI REQUIRED)
 
-# set(METIS_INCLUDE_DIR "/usr/include")
-# set(METIS_LIBRARY "/usr/lib/x86_64-linux-gnu/libmetis.so")
-# set(METIS_LIBRARY "/usr/lib/x86_64-linux-gnu/libmetis.so.5.1.0")
+# ============================================================================
+# Third-party libraries
+# ============================================================================
 
 set(METIS_INCLUDE_DIR "/home/emc2/Software/lib/metis_lib/include")
 set(METIS_LIBRARY "/home/emc2/Software/lib/metis_lib/lib/libmetis.so")
@@ -24,41 +24,99 @@ set(GK_LIBRARY "/home/emc2/Software/lib/gk_lib/lib/libGKlib.a")
 # tecio
 include_directories(./tecio/)
 link_directories(./tecio/)
-# teciompi
-# include_directories(./teciompi/)
-# link_directories(./teciompi/)
 
-add_executable(solver
-    src/main.cpp
+# ============================================================================
+# Source files
+# ============================================================================
+
+set(SRC_APP
+    src/app/readConfig.cpp
+    src/app/readMesh.cpp
+    src/app/app.cpp
+)
+
+set(SRC_CORE
     src/core/config.cpp
-    src/mesh/mesh.cpp
     src/core/utils.cpp
-    src/dvm/dvmSolver.cpp
-    src/dvm/velocitySpace.cpp
     src/core/object.cpp
-    src/io/output.cpp
+)
+
+set(SRC_MESH
+    src/mesh/mesh.cpp
     src/mesh/partition.cpp
     src/mesh/halo.cpp
     src/mesh/computeGeometry.cpp
-    src/mesh/meshDeform.cpp
-    src/dvm/adjointDVM.cpp
-    src/sensitivity/boundary_sensitivity.cpp
-    # src/test/geom_chain_validation.cpp
-    src/test/adjoint_validation.cpp
-    src/test/lsq_validation.cpp
 )
 
-target_include_directories(solver PUBLIC 
-    src 
-    src/core 
-    src/io 
-    src/mesh 
+set(SRC_DVM
+    src/dvm/dvmSolver.cpp
+    src/dvm/velocitySpace.cpp
+    src/dvm/adjointDVM.cpp
+)
+
+set(SRC_IO
+    src/io/output.cpp
+)
+
+set(SRC_SENSITIVITY
+    src/sensitivity/boundary_sensitivity.cpp
+)
+
+set(SRC_SHAPE
+    src/shape/meshDeform.cpp
+)
+
+set(SRC_OPTIMIZATION
+    # src/optimization/optimizer.cpp
+    # src/optimization/optimize_driver.cpp
+)
+
+set(SRC_TEST
+    src/test/adjoint_validation.cpp
+    src/test/lsq_validation.cpp
+    # src/test/geom_chain_validation.cpp
+)
+
+set(SRC_MAIN
+    src/main.cpp
+)
+
+# ============================================================================
+# Target
+# ============================================================================
+
+add_executable(solver)
+
+target_sources(solver PRIVATE
+    ${SRC_MAIN}
+    ${SRC_CORE}
+    ${SRC_MESH}
+    ${SRC_DVM}
+    ${SRC_IO}
+    ${SRC_SENSITIVITY}
+    ${SRC_TEST}
+    ${SRC_SHAPE}
+    ${SRC_OPTIMIZATION}
+    ${SRC_APP}
+)
+
+target_include_directories(solver PRIVATE
+    src
+    src/core
+    src/io
+    src/mesh
     src/dvm
     src/sensitivity
     src/test
+    src/shape
+    src/optimization
+    src/app
     ${METIS_INCLUDE_DIR}
     ${GK_INCLUDE_DIR}
+    ${TECIO_INCLUDE_DIR}
 )
+
+
 target_link_libraries(solver PUBLIC 
     tecio
     MPI::MPI_CXX

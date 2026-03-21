@@ -15,19 +15,15 @@
 
 class dvmSolver {
 public:
+    // config
+    const SolverConfig& cfg;
+    // MPI
     MPI_Comm comm;
     int rank,size;
-
     DvmProfiler profiler;
     // mesh
     const Mesh &mesh;
     const int Nv;
-
-    HaloWorkspace halo_ws;
-
-    // constant
-    SolverConfig cfg;
-
     const std::vector<double> &Vx,&Vy,&Vz;
     const std::vector<double>& weight;
     const std::vector<double>& c2;
@@ -36,6 +32,7 @@ public:
     const std::vector<std::array<double, Nmacro>>& weight_macro;
     // vdf
     std::vector<scalar> vdf,rhs;
+    HaloWorkspace halo_ws;
     // macro
     std::vector<scalar> macro;
     std::vector<scalar> hot;

@@ -494,7 +494,7 @@ bool validatePressureFarFieldBoundaryYMode(
     // =========================
     // 2) adjoint
     // =========================
-    adjointDVM adj(solver);
+    adjointDVM adj(localMesh, vel, cfg, comm);
 
     for (int iter = 1; iter < cfg.max_iter; ++iter)
     {
